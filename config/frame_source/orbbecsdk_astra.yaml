@@ -1,0 +1,18 @@
+frame_source:
+  type: orbbecsdk
+  sdk_root: third_party/orbbecsdk/v1.10.27
+  width: 640
+  height: 480
+  fps: 30
+  align:
+    # hardware: use OrbbecSDK hardware D2C.
+    # software: use OrbbecSDK software D2C.
+    # off: disable D2C.
+    mode: hardware
+  sync:
+    # Astra Pro Plus does not expose SDK frame sync/global timestamp reliably;
+    # pair RGB/depth by host system timestamp, similar to ROS2 ApproximateTime.
+    approx_sync_ms: 50
+    max_queue_size: 10
+    wait_timeout_ms: 1000
+    enable_frame_sync: false

@@ -1,0 +1,9 @@
+counter:
+  type: bayesian
+  max_object_count: 5
+  total_max: 15
+  miss_rate: 0.7
+  false_positive_rate: 0.1
+  smooth_window: 5
+  min_positive_frames: 3
+  selection_threshold: 0.5

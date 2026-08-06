@@ -1,0 +1,12 @@
+detector:
+  type: yolov11
+  backend: auto
+  weights: models/yolov11_0922_final_real_book_mixup_deg_shear
+  input_width: 640
+  input_height: 640
+  conf_thresh: 0.3
+  nms_thresh: 0.7
+  graph_optimization_level: ORT_ENABLE_ALL
+  providers:
+    - CoreMLExecutionProvider
+    - CPUExecutionProvider

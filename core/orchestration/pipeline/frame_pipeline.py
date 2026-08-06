@@ -1,0 +1,207 @@
+"""逐帧处理流水线：被各轮次状态机共用。"""
+from __future__ import annotations
+
+import time
+from typing import Dict, Iterable, List, Optional
+
+from core.components.counter.base import BaseCounter
+from core.components.detector.base import BaseDetector
+from core.components.filter.base import BaseFilter
+from core.infra.logging.event_logger import EventLogger
+from core.components.ocr.base import BaseOcr
+from core.components.table_locator.base import BaseTableLocator
+from core.types import Frame, RecognitionItem
+from core.infra.visualization.base import BaseVisualizer
+
+
+class FramePipeline:
+    """依次执行：检测 → 桌面定位 → 深度过滤 → OCR → 计数 → 可视化。"""
+
+    def __init__(
+        self,
+        detector: BaseDetector,
+        table_locator: BaseTableLocator,
+        table_filter: BaseFilter,
+        ocr: BaseOcr,
+        counter: BaseCounter,
+        visualizer: BaseVisualizer,
+        logger: EventLogger,
+        log_per_frame: bool = False,
+        ignored_by_counter: Iterable[str] = (),
+        round_started_at: Optional[float] = None,
+    ):
+        self.detector = detector
+        self.table_locator = table_locator
+        self.table_filter = table_filter
+        self.ocr = ocr
+        self.counter = counter
+        self.visualizer = visualizer
+        self.logger = logger
+        self.log_per_frame = bool(log_per_frame)
+        self.ignored_by_counter = set(ignored_by_counter)
+        self.current_state_name: Optional[str] = None
+        self.round_started_at = round_started_at
+
+    def set_state(self, state_name: str) -> None:
+        """记录当前状态机状态名，供可视化 overlay 使用。"""
+        self.current_state_name = state_name
+
+    def clear_state(self) -> None:
+        """清空当前状态机状态名。"""
+        self.current_state_name = None
+
+    def reset_table_state(self) -> None:
+        """清空不应从一个桌位/时间窗泄漏到下一个的状态。"""
+        self.table_locator.clear()
+        self.counter.clear()
+        self.logger.event("pipeline_table_state_reset")
+
+    def preview_frame(self, frame: Frame, table: int) -> None:
+        """仅渲染一帧，不改变识别状态。"""
+        self._render(frame, [], table, stage="preview")
+
+    def track_frame(self, frame: Frame, table: int) -> None:
+        """只更新桌面定位状态；用于 round2 的桌面锁定（acquire）阶段。"""
+        self._render(frame, [], table, stage="preview")
+        detections = self.detector.infer(frame, table)
+        self._render(frame, detections, table, stage="detect")
+        detections = self.table_locator.process(detections, table)
+        for stage in ("track", "locate", "filter", "ocr", "final"):
+            self._render(frame, detections, table, stage=stage)
+        if self.log_per_frame:
+            self.logger.event(
+                "pipeline_track",
+                table=table,
+                frame_id=frame.frame_id,
+                is_localized=self.table_locator.is_localized,
+                is_stable=self.table_locator.is_stable,
+                detection_count=len(detections),
+            )
+
+    def process_frame(self, frame: Frame, table: int) -> Dict[str, int]:
+        """处理单帧，并返回该桌位当前平滑后的计数结果。"""
+        detections = self.detector.infer(frame, table)
+        self._render(frame, detections, table, stage="detect")
+        if self.log_per_frame:
+            self.logger.event(
+                "pipeline_detect",
+                table=table,
+                frame_id=frame.frame_id,
+                detection_count=len(detections),
+            )
+
+        detections = self.table_locator.process(detections, table)
+        self._render(frame, detections, table, stage="locate")
+        if self.log_per_frame:
+            self.logger.event(
+                "pipeline_locate_table",
+                table=table,
+                frame_id=frame.frame_id,
+                is_localized=self.table_locator.is_localized,
+                detection_count=len(detections),
+            )
+
+        if not self.table_locator.is_localized:
+            # 桌面区域尚未定位时，过滤/计数结果不可靠，直接返回当前计数。
+            self._render(frame, detections, table, stage="final")
+            return self.counter.get_counts()
+
+        detections = self.table_filter.process(detections, frame, table)
+        self._render(frame, detections, table, stage="filter")
+        if self.log_per_frame:
+            self.logger.event(
+                "pipeline_filter",
+                table=table,
+                frame_id=frame.frame_id,
+                detection_count=len(detections),
+            )
+
+        ocr_detections = self.ocr.process(frame, detections, table)
+        detections.extend(ocr_detections)
+        self._render(frame, detections, table, stage="ocr")
+        if self.log_per_frame:
+            self.logger.event(
+                "pipeline_ocr",
+                table=table,
+                frame_id=frame.frame_id,
+                ocr_detection_count=len(ocr_detections),
+                detection_count=len(detections),
+            )
+
+        self._render(frame, detections, table, stage="final")
+
+        countable_detections = [
+            detection
+            for detection in detections
+            if detection.class_name not in self.ignored_by_counter
+        ]
+        self.counter.update(countable_detections)
+        counts = self.counter.get_counts()
+        if self.log_per_frame:
+            self.logger.event(
+                "pipeline_counter_update",
+                table=table,
+                frame_id=frame.frame_id,
+                counts=counts,
+            )
+        return counts
+
+    def get_items(self, table: int) -> List[RecognitionItem]:
+        """把当前计数器状态转换成提交给裁判的结果条目。"""
+        return [
+            RecognitionItem(
+                goal_id=goal_id,
+                num=count,
+                table=table,
+                confidence=1.0,
+                evidence={"source": "counter"},
+            )
+            for goal_id, count in sorted(self.counter.get_counts().items())
+        ]
+
+    def _render(
+        self,
+        frame: Frame,
+        detections,
+        table: int,
+        stage: str,
+    ) -> None:
+        """带上当前状态机状态名进行可视化渲染。"""
+        self.visualizer.render(
+            frame,
+            detections,
+            table,
+            stage=stage,
+            state_name=self.current_state_name,
+            elapsed_sec=(
+                None
+                if self.round_started_at is None
+                else max(0.0, time.monotonic() - self.round_started_at)
+            ),
+        )
+
+    def close(self) -> None:
+        """关闭流水线各组件持有的可选资源。"""
+        self.visualizer.close()
+        close_filter = getattr(self.table_filter, "close", None)
+        if close_filter is not None:
+            close_filter()
+        close_ocr = getattr(self.ocr, "close", None)
+        if close_ocr is not None:
+            close_ocr()
+        close_detector = getattr(self.detector, "close", None)
+        if close_detector is not None:
+            close_detector()
+        self._close_acl_runtime_if_initialized()
+
+    @staticmethod
+    def _close_acl_runtime_if_initialized() -> None:
+        """推理模型释放后立即关闭 ACL runtime，避免拖到进程退出阶段释放。"""
+        try:
+            from core.infra.inference.acl.resource_manager import AclResourceManager
+        except Exception:
+            return
+
+        instance = getattr(AclResourceManager, "_instance", None)
+        if instance is not None:
+            instance.close()

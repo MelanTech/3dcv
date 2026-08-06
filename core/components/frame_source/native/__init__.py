@@ -1,0 +1,1 @@
+"""Native frame source extensions."""

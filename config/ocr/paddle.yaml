@@ -1,0 +1,17 @@
+ocr:
+  type: paddle
+  # 引擎运行开关
+  use_angle_cls: true          # 启用文字方向(0/180)分类矫正
+  use_gpu: false               # 使用 CPU 推理（onnxruntime）
+  # 模板模糊匹配参数（模板文本定义在 class_registry.ocr_templates）
+  enlarge: 1.0                 # 裁剪图放大倍数（>1 时先放大再 OCR）
+  min_match_score: 0.0         # rapidfuzz 相似度阈值，超过才认定命中
+  # PaddleOCR ONNX 引擎参数
+  engine:
+    backend: auto                # auto: 香橙派用 acl(.om)，其它平台用 onnx(.onnx)
+    det_model_dir: models/ppocrv5/det.onnx
+    rec_model_dir: models/ppocrv5/rec.onnx
+    cls_model_dir: models/ppocrv5/cls.onnx
+    rec_char_dict_path: models/ppocrv5/ppocrv5_dict.txt
+    det_db_box_thresh: 0.3
+    det_box_type: quad

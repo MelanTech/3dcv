@@ -1,0 +1,6 @@
+state_machine:
+  time_scale: 1.0
+  settle_wait_sec: 2.0
+  max_acquire_sec: 5.0
+  round1_recognize_sec: 28.0
+  round2_table_durations_sec: [15.0, 15.0, 40.0]

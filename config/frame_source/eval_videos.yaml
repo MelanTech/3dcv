@@ -1,0 +1,38 @@
+frame_source:
+  type: image_sequence
+  base_paths:
+    default: /Users/bytedance/Develop/datasets/3dcv/eval_videos
+    orangepi: /home/HwHiAiUser/Project/eval_videos
+
+  common:
+    read_interval: 1
+    fps: 30
+    loop: false
+    rgb_dir: rgb
+    depth_dir: depth
+    rgb_suffix: _rgb
+    depth_suffix: _depth
+    rgb_extensions:
+      - .jpg
+      - .jpeg
+      - .png
+    depth_extensions:
+      - .png
+    convert_rgb: true
+
+  rounds:
+    round1:
+      sequences:
+        - eval_015
+
+    round2:
+      sequences:
+        - eval_015
+        - eval_016
+        - eval_017
+      transition:
+        enabled: true
+        direction: random
+        duration_frames_range: [20, 45]
+        random_seed: null
+        depth_mode: nearest

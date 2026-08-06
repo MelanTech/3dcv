@@ -1,0 +1,7 @@
+referee:
+  enabled: true
+  ip: 192.168.1.88
+  port: 6666
+  result_base_dir: ~/Desktop/result
+  connect_retry_sec: 1.0
+  connect_timeout_sec: 3.0

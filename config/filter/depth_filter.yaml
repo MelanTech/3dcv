@@ -1,0 +1,72 @@
+filter:
+  type: depth
+  # 离线视频评估使用配置内参；这里使用采集相机的 color 内参，
+  # 对应深度已对齐到彩色图后的 RGB 像素坐标系。
+  intrinsic:
+    width: 640
+    height: 480
+    fx: 577.8551635742188
+    fy: 577.8551635742188
+    cx: 315.8110656738281
+    cy: 234.57275390625
+
+  depth_filter:
+    object_depth:
+      coord_sample_num: 20
+      min_valid_pixels: 5
+      expand_ratios: [0.15, 0.3]
+      table_plane_fallback: true
+      plane_offset_m: 0.0
+
+    filtering:
+      keep_table: true
+      use_support_point: true
+
+    visualization:
+      enabled: false
+      window:
+        width: 640
+        height: 480
+      depth_trunc_m: 2.0
+      point_cloud_stride: 2
+      show_detection_boxes: true
+      detection_box_depth_mode: median
+      table_box_height_m: 0.06
+
+    plane_fit:
+      enabled: true
+      sample_stride: 4
+      max_points: 3000
+      min_points: 80
+      ransac_iterations: 80
+      update_interval_frames: 2
+      early_stop_inlier_ratio: 0.75
+      distance_thresh_m: 0.015
+      min_inlier_ratio: 0.35
+      use_unmasked_points_for_orientation: true
+      roi_shrink_ratio: 0.04
+
+    footprint:
+      mode: by_table
+      table_modes:
+        1: rectangle
+        2: rectangle
+        3: ellipse
+      range_percentile: 2.0
+      size_scale: 1.0
+      range_margin_m: 0.05
+      round_fill_ratio_max: 0.88
+      round_corner_ratio_max: 0.03
+      switch_min_frames: 3
+
+    smoothing:
+      alpha: 0.25
+      reset_distance_m: 0.35
+      reject_distance_m: 0.12
+      reject_angle_deg: 18.0
+      reject_size_ratio: 1.8
+      hold_on_failure: true
+      max_hold_frames: 8
+
+    fallback:
+      dynamic_scale: 0.8

@@ -1,0 +1,113 @@
+class_registry:
+  # Pipeline 内部统一使用物品名称；最终写结果时再映射成比赛 Goal_ID。
+  result_classes:
+    - Brush
+    - Earphone
+    - Cup
+    - ClothesHanger
+    - Chocolate
+    - MelonSeeds
+    - Sausage
+    - Chips
+    - Can
+    - Bottle
+    - Milk
+    - Water
+    - Peach
+    - Apple
+    - Banana
+    - Pear
+    - W001
+    - W002
+    - W003
+    - W004
+
+  result_class_to_goal_id:
+    Brush: CA001
+    Earphone: CA002
+    Cup: CA003
+    ClothesHanger: CA004
+    Chocolate: CB001
+    MelonSeeds: CB002
+    Sausage: CB003
+    Chips: CB004
+    Can: CC001
+    Bottle: CC002
+    Milk: CC003
+    Water: CC004
+    Peach: CD001
+    Apple: CD002
+    Banana: CD003
+    Pear: CD004
+    W001: W001
+    W002: W002
+    W003: W003
+    W004: W004
+
+  internal_classes:
+    - Table
+    - Book
+
+  detector_id_to_class:
+    0: Table
+    1: Brush
+    2: Earphone
+    3: Cup
+    4: ClothesHanger
+    5: Chocolate
+    6: MelonSeeds
+    7: Sausage
+    8: Chips
+    9: Can
+    10: Bottle
+    11: Milk
+    12: Water
+    13: Peach
+    14: Apple
+    15: Banana
+    16: Pear
+    17: Book
+
+  ignored_by_counter:
+    - Table
+    - Book
+
+  ocr_candidate_classes:
+    - Book
+
+  ocr_output_classes:
+    - W001
+    - W002
+    - W003
+    - W004
+
+  ocr_templates:
+    W001: 怪兽
+    W002: 语文阅读写作诵读经典国语作文三字经论语诗词弟子规古诗文言文散文
+    W003: 高等数学线性代数函数立体几何概率方程算术口算
+    W004: 自然物理化学科学地理生物生态环境节气
+
+  # RGB 颜色，OpenCV 可视化时会自动转换为 BGR。
+  bbox_colors:
+    Table: [0, 255, 0]
+    Book: [255, 255, 255]
+    Brush: [255, 0, 0]
+    Earphone: [0, 255, 255]
+    Cup: [255, 0, 255]
+    ClothesHanger: [255, 255, 0]
+    Chocolate: [0, 128, 255]
+    MelonSeeds: [128, 255, 0]
+    Sausage: [255, 128, 0]
+    Chips: [0, 255, 128]
+    Can: [128, 0, 255]
+    Bottle: [255, 0, 128]
+    Milk: [0, 64, 255]
+    Water: [0, 255, 64]
+    Peach: [255, 64, 0]
+    Apple: [64, 255, 0]
+    Banana: [255, 255, 64]
+    Pear: [64, 255, 128]
+    W001: [255, 64, 255]
+    W002: [64, 255, 255]
+    W003: [255, 64, 128]
+    W004: [128, 255, 64]

@@ -1,0 +1,13 @@
+table_locator:
+  type: table_locator
+  init_frames: 10
+  iou_threshold: 0.5
+  min_area: 400
+  update_interval: 5
+  update_iou_threshold: 0.5
+  default_bbox: [150, 100, 490, 380]
+  min_stable_frames: 8
+  max_center_shift_px: 8
+  max_size_change_ratio: 0.05
+  max_area_trend_ratio: 0.08
+  max_missing_frames: 5

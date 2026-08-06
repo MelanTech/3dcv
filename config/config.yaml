@@ -1,0 +1,42 @@
+team:
+  file_prefix: USTB-MQMM5
+  team_id: REPLACE-HERE
+
+logging:
+  base_dir: runs/logs
+  console: true
+  per_frame: false
+
+visualization:
+  enabled: true
+  type: opencv
+  mode: rgb_depth_overlay
+  window_name: 3DCV
+  depth_max_mm: 5000
+  depth_overlay_alpha: 0.45
+  wait_key_ms: 1
+  draw_labels: true
+  draw_status_label: true
+  draw_state_label: true
+  overlay_text_scale: 0.45
+  overlay_line_height: 18
+  fps_smoothing: 0.8
+  stages: # Available stages: preview, detect, track, locate, filter, ocr, final.
+    # - preview
+    # - detect
+    # - track
+    # - locate
+    # - filter
+    # - ocr
+    - final
+
+mixins:
+  - !include state_machine/default.yaml
+  - !include frame_source/orbbecsdk_astra.yaml
+  - !include referee/disabled.yaml
+  - !include class_registry/default.yaml
+  - !include detector/yolo/yolov11.yaml
+  - !include table_locator/default.yaml
+  - !include filter/depth_filter.yaml
+  - !include ocr/paddle.yaml
+  - !include counter/bayesian.yaml

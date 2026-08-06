@@ -1,0 +1,21 @@
+frame_source:
+  type: openni
+  openni_lib: null
+  width: 640
+  height: 480
+  fps: 30
+  color_source: auto
+  uvc_device: /dev/video0
+  allow_unregistered: true
+  mirror: false
+  d2c:
+    # hardware: let the Orbbec OpenNI driver register depth to color.
+    # off: return raw depth without registration.
+    mode: hardware
+  sync:
+    # Keep UVC RGB capture running in a background thread and consume only latest frame.
+    uvc_latest_thread: true
+    # Match UVC RGB to the current OpenNI depth frame by host monotonic timestamp.
+    approx_sync_ms: 50
+    approx_sync_max_queue: 10
+    approx_sync_fallback_latest: true
