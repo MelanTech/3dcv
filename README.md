@@ -110,7 +110,7 @@ python3 main.py --round round2 --config config/config.yaml
     │   └── state_machine/      # 轮次状态机、帧采集器、状态日志器
     ├── components/             # 可插拔业务组件（每类含 base + 实现 + builder）
     │   ├── frame_source/       # 帧源：图片序列 / OpenNI 相机
-    │   ├── detector/           # 检测器：YOLO（后端 + 解码器可插拔）
+    │   ├── detector/           # 检测器：按版本隔离（如 yolov11/）
     │   ├── table_locator/      # 桌面定位器
     │   ├── filter/             # 深度过滤器
     │   ├── ocr/                # OCR：PaddleOCR ONNX 引擎 + 书本文字分类
@@ -410,11 +410,11 @@ END
 
 ### detector 检测器
 
-[config/detector/yolo/yolov11.yaml](config/detector/yolo/yolov11.yaml)。对应 YOLO 系列检测器，后端与解码器可插拔（工厂见 [detector/yolo/factory.py](core/components/detector/yolo/factory.py)、后端解析见 [resolver.py](core/components/detector/yolo/resolver.py)）。
+[config/detector/yolo/yolov11.yaml](config/detector/yolo/yolov11.yaml)。对应 [YOLOv11Detector](core/components/detector/yolov11/detector.py)。YOLO 不同版本的预处理、输出张量和后处理容易分叉，因此代码按版本隔离在 `core/components/detector/yolov11/` 这类目录下。
 
 | 键                              | 示例                                                | 说明                                                                                                         |
 | ------------------------------ | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `type`                         | `yolov11`                                         | 检测器类型（决定使用哪个解码器）                                                                                           |
+| `type`                         | `yolov11`                                         | 检测器类型（决定使用哪个版本目录下的实现）                                                                                           |
 | `backend`                      | `auto`                                            | 推理后端：`auto` / `onnx` / `acl`。`auto` 时香橙派选 `acl`（`.om`），其它平台选 `onnx`（`.onnx`）。可被环境变量 `3DCV_YOLO_BACKEND` 覆盖 |
 | `weights`                      | `models/yolov11_...`                              | 权重路径前缀，**不含扩展名**；扩展名由后端自动补齐（`.om` / `.onnx`）                                                               |
 | `input_width` / `input_height` | `640` / `640`                                     | 网络输入尺寸（letterbox 目标尺寸）                                                                                     |
@@ -422,6 +422,27 @@ END
 | `nms_thresh`                   | `0.7`                                             | NMS 的 IoU 阈值                                                                                               |
 | `graph_optimization_level`     | `ORT_ENABLE_ALL`                                  | ONNX Runtime 图优化级别（onnx 后端）                                                                                |
 | `providers`                    | `[CoreMLExecutionProvider, CPUExecutionProvider]` | ONNX Runtime 的 execution provider 优先级列表                                                                    |
+
+RGBD 版本使用 [config/detector/yolo/yolov11_rgbd.yaml](config/detector/yolo/yolov11_rgbd.yaml)，
+对应 [YOLOv11RgbdDetector](core/components/detector/yolov11_rgbd/detector.py)。它与原
+`yolov11` detector 完全隔离，但后处理语义对齐 Ultralytics：`xywh2xyxy`、按类别偏移的
+NMS、`max_det`、`agnostic_nms`、`scale_boxes` 坐标还原。启用方式是把
+[config.yaml](config/config.yaml) 中 detector include 替换为：
+
+```yaml
+- !include detector/yolo/yolov11_rgbd.yaml
+```
+
+RGBD detector 额外配置：
+
+| 键             | 示例   | 说明 |
+| -------------- | ------ | ---- |
+| `depth_max_mm` | `3000` | 深度毫米图裁剪归一化上限，推理输入第 4 通道为 `clip(depth, 0, depth_max_mm) / depth_max_mm` |
+| `pad_value`    | `114`  | RGBD 四通道 letterbox 填充值，默认与 Ultralytics 训练端多通道 `LetterBox` 保持一致 |
+| `max_det`      | `300`  | NMS 后最多保留检测框数 |
+| `max_nms`      | `30000` | 进入 NMS 前最多候选数 |
+| `max_wh`       | `7680` | 类别偏移 NMS 使用的最大宽高常量 |
+| `agnostic_nms` | `false` | 是否做类别无关 NMS |
 
 ***
 

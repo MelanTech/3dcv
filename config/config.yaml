@@ -32,7 +32,7 @@ visualization:
 
 mixins:
   - !include state_machine/default.yaml
-  - !include frame_source/orbbecsdk_astra.yaml
+  - !include frame_source/eval_videos.yaml
   - !include referee/disabled.yaml
   - !include class_registry/default.yaml
   - !include detector/yolo/yolov11.yaml
