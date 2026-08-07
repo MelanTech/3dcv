@@ -10,7 +10,7 @@ from core.components.filter.base import BaseFilter
 from core.infra.logging.event_logger import EventLogger
 from core.components.ocr.base import BaseOcr
 from core.components.table_locator.base import BaseTableLocator
-from core.types import Frame, RecognitionItem
+from core.types import Detection, Frame, RecognitionItem
 from core.infra.visualization.base import BaseVisualizer
 
 
@@ -117,7 +117,10 @@ class FramePipeline:
             )
 
         ocr_detections = self.ocr.process(frame, detections, table)
-        detections.extend(ocr_detections)
+        detections, ocr_replaced_count = self._merge_ocr_detections(
+            detections,
+            ocr_detections,
+        )
         self._render(frame, detections, table, stage="ocr")
         if self.log_per_frame:
             self.logger.event(
@@ -125,6 +128,7 @@ class FramePipeline:
                 table=table,
                 frame_id=frame.frame_id,
                 ocr_detection_count=len(ocr_detections),
+                ocr_replaced_count=ocr_replaced_count,
                 detection_count=len(detections),
             )
 
@@ -158,6 +162,47 @@ class FramePipeline:
             )
             for goal_id, count in sorted(self.counter.get_counts().items())
         ]
+
+    def _merge_ocr_detections(
+        self,
+        detections: List[Detection],
+        ocr_detections: List[Detection],
+    ) -> tuple[List[Detection], int]:
+        """OCR 命中时替换原候选框；OCR 失败的候选框保留。
+
+        PaddleOcr 返回的 bbox 与原始 Book bbox 一致。这里按 bbox 匹配：
+        - 匹配到 OCR 结果：用 W00x 等 OCR 类别替换原 Book；
+        - 没匹配到 OCR 结果：保留原 Book，后续 counter 仍按 ignored_by_counter 忽略。
+        """
+        if not ocr_detections:
+            return detections, 0
+
+        candidate_classes = set(getattr(self.ocr, "candidate_classes", ()))
+        if not candidate_classes:
+            candidate_classes = {"Book"}
+
+        ocr_by_bbox = {
+            tuple(ocr_detection.bbox): ocr_detection
+            for ocr_detection in ocr_detections
+        }
+        merged: List[Detection] = []
+        replaced_count = 0
+
+        for detection in detections:
+            replacement = None
+            if detection.class_name in candidate_classes:
+                replacement = ocr_by_bbox.pop(tuple(detection.bbox), None)
+
+            if replacement is None:
+                merged.append(detection)
+                continue
+
+            merged.append(replacement)
+            replaced_count += 1
+
+        # 理论上 OCR bbox 都来自原候选框；保留兜底，避免异常 OCR 结果被静默丢弃。
+        merged.extend(ocr_by_bbox.values())
+        return merged, replaced_count
 
     def _render(
         self,
