@@ -26,10 +26,15 @@ class FrameCollector:
         started = time.monotonic()
         deadline = started + actual_sec
         frame_count = 0
+        source_exhausted = False
 
         try:
             while time.monotonic() < deadline or frame_count == 0:
-                frame = next(self.frame_source)
+                try:
+                    frame = next(self.frame_source)
+                except StopIteration:
+                    source_exhausted = True
+                    break
                 frame_count += 1
                 yield frame
                 if actual_sec <= 0:
@@ -43,6 +48,7 @@ class FrameCollector:
                 actual_sec=actual_sec,
                 elapsed_sec=elapsed,
                 frame_count=frame_count,
+                source_exhausted=source_exhausted,
             )
 
     def iter_until(self, deadline: float, reason: str, nominal_sec: Optional[float] = None) -> Iterator[Frame]:
@@ -50,10 +56,15 @@ class FrameCollector:
         started = time.monotonic()
         actual_sec = max(0.0, float(deadline) - started)
         frame_count = 0
+        source_exhausted = False
 
         try:
             while time.monotonic() < deadline:
-                frame = next(self.frame_source)
+                try:
+                    frame = next(self.frame_source)
+                except StopIteration:
+                    source_exhausted = True
+                    break
                 frame_count += 1
                 yield frame
         finally:
@@ -66,6 +77,7 @@ class FrameCollector:
                 elapsed_sec=elapsed,
                 frame_count=frame_count,
                 deadline_sec=deadline,
+                source_exhausted=source_exhausted,
             )
 
     def collect_frames(self, nominal_sec: float, reason: str) -> List[Frame]:
