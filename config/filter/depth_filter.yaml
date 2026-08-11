@@ -55,6 +55,11 @@ filter:
       range_percentile: 2.0
       size_scale: 1.0
       range_margin_m: 0.05
+      vertical_expansion:
+        enabled: true
+        angle_deg: 35.0
+        max_extra_margin_m: 0.05
+        min_height_m: 0.0
       round_fill_ratio_max: 0.88
       round_corner_ratio_max: 0.03
       switch_min_frames: 3

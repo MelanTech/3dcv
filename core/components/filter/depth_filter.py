@@ -165,6 +165,26 @@ class DepthFilter(BaseFilter):
         self.table_range_margin_m = float(
             read(footprint_config, "range_margin_m", 0.02, "table_range_margin_m")
         )
+        vertical_expansion_config = footprint_config.get("vertical_expansion", {})
+        self.footprint_vertical_expansion_enabled = bool(
+            read(vertical_expansion_config, "enabled", False)
+        )
+        self.footprint_vertical_expansion_angle_deg = float(
+            read(vertical_expansion_config, "angle_deg", 0.0)
+        )
+        if not 0.0 <= self.footprint_vertical_expansion_angle_deg < 90.0:
+            raise ValueError("depth_filter.footprint.vertical_expansion.angle_deg must be in [0, 90)")
+        self.footprint_vertical_expansion_tan = float(
+            np.tan(np.deg2rad(self.footprint_vertical_expansion_angle_deg))
+        )
+        self.footprint_vertical_expansion_max_extra_margin_m = max(
+            0.0,
+            float(read(vertical_expansion_config, "max_extra_margin_m", 0.0)),
+        )
+        self.footprint_vertical_expansion_min_height_m = max(
+            0.0,
+            float(read(vertical_expansion_config, "min_height_m", 0.0)),
+        )
         self.table_footprint_mode = str(
             read(footprint_config, "mode", "auto", "table_footprint_mode")
         ).strip().lower()
@@ -1480,11 +1500,16 @@ class DepthFilter(BaseFilter):
                     filtered.append(detection)
                 continue
 
-            in_x = x_min <= center[0] <= x_max
-            in_z = z_min <= center[2] <= z_max
+            extra_margin = self._vertical_footprint_extra_margin(center, y_min)
+            local_x_min = x_min - extra_margin
+            local_x_max = x_max + extra_margin
+            local_z_min = z_min - extra_margin
+            local_z_max = z_max + extra_margin
+            in_x = local_x_min <= center[0] <= local_x_max
+            in_z = local_z_min <= center[2] <= local_z_max
             if footprint == "ellipse":
-                norm_x = (center[0] - center_x) / (radius_x + 0.02)
-                norm_z = (center[2] - center_z) / (radius_z + 0.02)
+                norm_x = (center[0] - center_x) / (radius_x + 0.02 + extra_margin)
+                norm_z = (center[2] - center_z) / (radius_z + 0.02 + extra_margin)
                 in_footprint = norm_x * norm_x + norm_z * norm_z <= 1.0
             else:
                 in_footprint = in_x and in_z
@@ -1493,6 +1518,20 @@ class DepthFilter(BaseFilter):
                 filtered.append(detection)
 
         return filtered
+
+    def _vertical_footprint_extra_margin(self, center: np.ndarray, y_min: float) -> float:
+        """按 table-y 高度把桌面 footprint 向外扩成倒置梯形/锥台。"""
+        if not self.footprint_vertical_expansion_enabled:
+            return 0.0
+        if self.footprint_vertical_expansion_tan <= 0.0:
+            return 0.0
+        height = float(center[1]) - float(y_min) - self.footprint_vertical_expansion_min_height_m
+        if height <= 0.0:
+            return 0.0
+        extra_margin = height * self.footprint_vertical_expansion_tan
+        if self.footprint_vertical_expansion_max_extra_margin_m > 0.0:
+            extra_margin = min(extra_margin, self.footprint_vertical_expansion_max_extra_margin_m)
+        return max(0.0, extra_margin)
 
     def _bbox_depth_m(
         self,

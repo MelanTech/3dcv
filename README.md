@@ -537,9 +537,25 @@ RGBD detector 额外配置：
 | `range_percentile` | `2.0` | 估计桌面边界时丢弃两端离群点的百分比 |
 | `size_scale` | `1.0` | 平面拟合成功时，对自动估计桌面长宽做等比例缩放 |
 | `range_margin_m` | `0.05` | 自动估计桌面范围后额外扩出的边缘余量（米） |
+| `vertical_expansion.enabled` | `true` | 是否按物体 table-y 高度把 footprint 向外扩成倒置梯形/锥台 |
+| `vertical_expansion.angle_deg` | `35.0` | 相对 table-y 轴的张开角度；越大，物体越高时 `x/z` 允许范围扩得越快 |
+| `vertical_expansion.max_extra_margin_m` | `0.05` | 高度扩张带来的额外边缘余量上限（米），防止远离桌面的物体被放进来 |
+| `vertical_expansion.min_height_m` | `0.0` | 起扩高度（米）；物体高出 `y_min` 超过该值后才开始按角度扩张 |
 | `round_fill_ratio_max` | `0.88` | `auto` 时凸包面积/外接矩形面积低于该值则按圆/椭圆桌处理 |
 | `round_corner_ratio_max` | `0.03` | `auto` 时外接矩形角落占用率低于该值则按圆/椭圆桌处理 |
 | `switch_min_frames` | `3` | `auto` 模式下连续多少帧判断为另一类型才切换 footprint |
+
+`vertical_expansion` 的额外扩张量按如下方式计算：
+
+```text
+extra_margin = tan(angle_deg) * max(0, center_y - y_min - min_height_m)
+extra_margin = min(extra_margin, max_extra_margin_m)
+```
+
+其中 `center_y` 是检测点在桌面坐标系中的 table-y 高度。它只改变 footprint 的
+`x/z` 判断范围，不改变 `above_y` 高度门槛；用途是让桌面上方的立体物体在边缘处
+有更合理的容差，同时避免像直接增大 `range_margin_m` 那样把桌面平面附近的地面/桌外
+物品整体放进来。
 
 `smoothing`：桌面模型时间平滑与离群拒绝。
 
