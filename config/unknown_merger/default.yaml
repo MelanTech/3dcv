@@ -1,0 +1,25 @@
+unknown_merger:
+  enabled: true
+  # detector_class: reuse classes emitted by the main detector, such as Book.
+  # open_set: use an open-set detector, e.g. YOLOE, as the OCR candidate source.
+  # both: merge both sources with NMS.
+  # disabled: do not create unknown OCR candidates.
+  mode: detector_class
+  output_class: UnknownOcrCandidate
+
+  detector_class:
+    enabled: true
+    classes:
+      - Book
+
+  open_set:
+    enabled: false
+    detector: !include ../detector/yolo/yoloe26.yaml
+
+  merge:
+    candidate_iou_threshold: 0.6
+    known_overlap_iou_threshold: 0.5
+    suppress_source_classes:
+      - Book
+    source_overlap_iou_threshold: 0.6
+    prefer: open_set

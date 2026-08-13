@@ -1,6 +1,6 @@
 team:
   file_prefix: USTB-MQMM5
-  team_id: REPLACE-HERE
+  team_id: Y2607T1733227
 
 logging:
   base_dir: runs/logs
@@ -23,7 +23,7 @@ visualization:
   fps_smoothing: 0.8
   stages: # Available stages: preview, detect, track, locate, filter, ocr, final.
     # - preview
-    # - detect
+    - detect
     # - track
     # - locate
     # - filter
@@ -35,7 +35,8 @@ mixins:
   - !include frame_source/eval_videos.yaml
   - !include referee/disabled.yaml
   - !include class_registry/default.yaml
-  - !include detector/yolo/yolov11.yaml
+  - !include detector/yolo/yolov11_rgbd.yaml
+  - !include unknown_merger/default.yaml
   - !include table_locator/default.yaml
   - !include filter/depth_filter.yaml
   - !include ocr/paddle.yaml

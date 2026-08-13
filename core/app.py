@@ -13,6 +13,7 @@ from core.components.filter.builder import build_filter
 from core.components.referee.builder import build_referee_client
 from core.infra.logging.event_logger import EventLogger
 from core.components.ocr.builder import build_ocr
+from core.components.unknown_merger.builder import build_unknown_merger
 from core.orchestration.pipeline.frame_pipeline import FramePipeline
 from core.orchestration.state_machine.round1_state_machine import Round1StateMachine
 from core.orchestration.state_machine.round2_state_machine import Round2StateMachine
@@ -60,6 +61,14 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
             logger,
             "ocr",
             lambda: build_ocr(config["ocr"], config.get("class_registry")),
+        )
+        unknown_merger = _build_component(
+            logger,
+            "unknown_merger",
+            lambda: build_unknown_merger(
+                config.get("unknown_merger"),
+                config.get("class_registry"),
+            ),
         )
         frame_source = _build_component(
             logger,
@@ -123,6 +132,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                 counter=counter,
                 visualizer=visualizer,
                 logger=logger,
+                unknown_merger=unknown_merger,
                 log_per_frame=logging_config.get("per_frame", False),
                 ignored_by_counter=config.get("class_registry", {}).get("ignored_by_counter", []),
                 round_started_at=round_started_at,

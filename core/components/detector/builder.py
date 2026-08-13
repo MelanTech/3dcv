@@ -26,4 +26,9 @@ def build_detector(config: dict, _round_name: str, class_registry: Optional[Dict
 
         return build_yolov11_rgbd_detector(config, class_registry)
 
+    if detector_type == "yoloe26":
+        from core.components.detector.yoloe26.detector import build_yoloe26_detector
+
+        return build_yoloe26_detector(config)
+
     raise ValueError(f"unsupported detector type: {detector_type}")

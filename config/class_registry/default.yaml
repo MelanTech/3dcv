@@ -47,6 +47,7 @@ class_registry:
   internal_classes:
     - Table
     - Book
+    - UnknownOcrCandidate
 
   detector_id_to_class:
     0: Table
@@ -71,9 +72,10 @@ class_registry:
   ignored_by_counter:
     - Table
     - Book
+    - UnknownOcrCandidate
 
   ocr_candidate_classes:
-    - Book
+    - UnknownOcrCandidate
 
   ocr_output_classes:
     - W001
@@ -82,15 +84,16 @@ class_registry:
     - W004
 
   ocr_templates:
-    W001: 怪兽
-    W002: 语文阅读写作诵读经典国语作文三字经论语诗词弟子规古诗文言文散文
-    W003: 高等数学线性代数函数立体几何概率方程算术口算
+    W001: 语文阅读写作诵读经典国语作文三字经论语诗词弟子规古诗文言文散文
+    W002: 高等数学线性代数函数立体几何概率方程算术口算
+    W003: 英语外语单词语法
     W004: 自然物理化学科学地理生物生态环境节气
 
   # RGB 颜色，OpenCV 可视化时会自动转换为 BGR。
   bbox_colors:
     Table: [0, 255, 0]
     Book: [255, 255, 255]
+    UnknownOcrCandidate: [255, 255, 255]
     Brush: [255, 0, 0]
     Earphone: [0, 255, 255]
     Cup: [255, 0, 255]

@@ -12,6 +12,7 @@ from core.components.ocr.base import BaseOcr
 from core.components.table_locator.base import BaseTableLocator
 from core.types import Detection, Frame, RecognitionItem
 from core.infra.visualization.base import BaseVisualizer
+from core.utils.box import bbox_iou
 
 
 class FramePipeline:
@@ -26,6 +27,7 @@ class FramePipeline:
         counter: BaseCounter,
         visualizer: BaseVisualizer,
         logger: EventLogger,
+        unknown_merger=None,
         log_per_frame: bool = False,
         ignored_by_counter: Iterable[str] = (),
         round_started_at: Optional[float] = None,
@@ -37,6 +39,7 @@ class FramePipeline:
         self.counter = counter
         self.visualizer = visualizer
         self.logger = logger
+        self.unknown_merger = unknown_merger
         self.log_per_frame = bool(log_per_frame)
         self.ignored_by_counter = set(ignored_by_counter)
         self.current_state_name: Optional[str] = None
@@ -105,6 +108,18 @@ class FramePipeline:
             # 桌面区域尚未定位时，过滤/计数结果不可靠，直接返回当前计数。
             self._render(frame, detections, table, stage="final")
             return self.counter.get_counts()
+
+        if self.unknown_merger is not None:
+            unknown_candidates = self.unknown_merger.infer(frame, detections, table)
+            detections = self._merge_unknown_candidates(detections, unknown_candidates)
+            if self.log_per_frame:
+                self.logger.event(
+                    "pipeline_unknown_merger",
+                    table=table,
+                    frame_id=frame.frame_id,
+                    unknown_candidate_count=len(unknown_candidates),
+                    detection_count=len(detections),
+                )
 
         detections = self.table_filter.process(detections, frame, table)
         self._render(frame, detections, table, stage="filter")
@@ -204,6 +219,35 @@ class FramePipeline:
         merged.extend(ocr_by_bbox.values())
         return merged, replaced_count
 
+    @staticmethod
+    def _merge_unknown_candidates(
+        detections: List[Detection],
+        unknown_candidates: List[Detection],
+    ) -> List[Detection]:
+        """Append OCR-only unknown candidates without replacing main detections."""
+        if not unknown_candidates:
+            return detections
+
+        suppressed = set()
+        for candidate in unknown_candidates:
+            source_classes = set(candidate.evidence.get("suppress_source_classes", ()))
+            iou_threshold = float(candidate.evidence.get("suppress_source_iou_threshold", 0.0))
+            if not source_classes or iou_threshold <= 0.0:
+                continue
+            for index, detection in enumerate(detections):
+                if detection.class_name not in source_classes:
+                    continue
+                if bbox_iou(candidate.bbox, detection.bbox) >= iou_threshold:
+                    suppressed.add(index)
+
+        merged = [
+            detection
+            for index, detection in enumerate(detections)
+            if index not in suppressed
+        ]
+        merged.extend(unknown_candidates)
+        return merged
+
     def _render(
         self,
         frame: Frame,
@@ -237,6 +281,9 @@ class FramePipeline:
         close_detector = getattr(self.detector, "close", None)
         if close_detector is not None:
             close_detector()
+        close_unknown = getattr(self.unknown_merger, "close", None)
+        if close_unknown is not None:
+            close_unknown()
         self._close_acl_runtime_if_initialized()
 
     @staticmethod
