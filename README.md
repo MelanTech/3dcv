@@ -96,7 +96,7 @@ python3 main.py --round round2 --config config/config.yaml
 ├── start_r1.sh / start_r2.sh   # 两轮的启动脚本
 ├── requirements.txt
 ├── config/                     # 所有 YAML 配置（见下文配置详解）
-├── models/                     # 权重（YOLO .onnx/.om、OCR ppocrv5/）
+├── models/                     # 权重（YOLO .onnx/.om、OCR ppocrv5/ppocrv6/）
 ├── runs/                       # 运行日志输出目录（logging.base_dir）
 ├── result/                     # 结果文件示例目录
 ├── scripts/                    # 相机标定、D2C 对齐等独立调试脚本
@@ -156,7 +156,7 @@ main.py
 1. **检测（detect）** — 检测器对 RGB 图推理，得到图像坐标下的检测框。
 2. **桌面定位（locate）** — 桌面定位器跟踪「Table」检测，稳定后锁定桌面框。**若尚未定位成功，直接返回当前计数**（此时过滤/计数不可靠，跳过后续步骤）。
 3. **深度过滤（filter）** — 借助深度图把检测投影到 3D，只保留落在桌面范围内的目标。
-4. **OCR** — 对候选目标（默认 `Book`）裁剪后做文字识别，把识别文本模糊匹配到书本物品名，命中则作为额外检测项合并进来。
+4. **OCR** — 对 `UnknownOcrCandidate` 裁剪后做文字识别，把识别文本模糊匹配到书本类别，命中则作为额外检测项合并进来。
 5. **计数（counter update）** — 剔除 `ignored_by_counter` 中的类别后，用当前帧更新计数器。
 6. **可视化（visualize）** — 每个阶段都会调用可视化器渲染（仅渲染配置里开启的 `stages`）。
 
@@ -579,17 +579,21 @@ extra_margin = min(extra_margin, max_extra_margin_m)
 
 ### ocr 文字识别
 
-[config/ocr/paddle.yaml](config/ocr/paddle.yaml)。对应 [PaddleOcr](core/components/ocr/paddle_ocr.py)：底层是一份自迁移过来、自包含的 PaddleOCR v5 ONNX 引擎（[core/components/ocr/paddleocr/](core/components/ocr/paddleocr/)，纯 onnxruntime 推理，含 DB 文本检测 + 方向分类 + CTC 识别）。业务流程为：对上游检出的候选框（默认 `Book`）逐个裁剪 → OCR 识别文本并拼接 → 用 `rapidfuzz` 与 `class_registry.ocr_templates` 的模板串模糊匹配 → 命中则产出对应书本物品名称的检测。
+[config/ocr/paddle.yaml](config/ocr/paddle.yaml)。对应 [PaddleOcr](core/components/ocr/paddle_ocr.py)：继续使用项目内自包含的 ONNX/ACL 推理引擎，当前 Windows 配置加载 PP-OCRv6 small det/rec、原有 0/180 text-line cls，以及 PP-LCNet_x1_0_doc_ori 四方向模型。业务流程为：`UnknownOcrCandidate` crop → 四方向预测并旋正 → PP-OCRv6 文本检测 → 原有 0/180 行方向分类 → PP-OCRv6 识别并拼接 → 用 `rapidfuzz` 与模板串匹配。
 
 候选类别、输出类别与模板文本都归属共享的 `class_registry`（`ocr_candidate_classes` / `ocr_output_classes` / `ocr_templates`），因此本文件只配置 OCR 实现参数与引擎参数。
 
 | 键                 | 示例                    | 说明                                                             |
 | ----------------- | --------------------- | -------------------------------------------------------------- |
 | `type`            | `paddle`              | OCR 类型                                                         |
+| `version`         | `ppocrv6-small`       | 记录当前 det/rec 版本，写入 OCR evidence                                 |
 | `use_angle_cls`   | `true`                | 是否启用文字方向(0/180)分类矫正                                            |
+| `use_doc_orientation` | `true`            | 是否在 OCR 前启用 0/90/180/270 文档方向分类                               |
+| `doc_orientation_min_confidence` | `0.8` | 方向预测达到该置信度时才旋转；预测失败或低于阈值时沿用原 crop                    |
 | `use_gpu`         | `false`               | 是否用 GPU 推理（`false` 走 CPU onnxruntime）                          |
 | `enlarge`         | `1.0`                 | 裁剪图放大倍数；`>1` 时先放大再 OCR，有助于识别小字                                 |
-| `min_match_score` | `0.0`                 | rapidfuzz 相似度阈值（0~100），超过才认定命中                                 |
+| `min_match_score` | `60.0`                | rapidfuzz 相似度阈值（0~100），达到才认定命中                                 |
+| `min_text_length` | `2`                   | 最短可分类文本；默认拒绝单字，避免“语”误匹配成“英语”                              |
 | `engine`          | 见下                    | 传给底层 PaddleOCR 引擎的参数                                           |
 
 `engine` 子项（相对路径按运行时工作目录解析为绝对路径）：
@@ -597,14 +601,23 @@ extra_margin = min(extra_margin, max_extra_margin_m)
 | 键                    | 示例                              | 说明                    |
 | -------------------- | ------------------------------- | --------------------- |
 | `backend`            | `auto`                          | 推理后端：`auto` / `onnx` / `acl`。`auto` 时香橙派用 `acl`（`.om`），其它平台用 `onnx`（`.onnx`）。可被 `3DCV_OCR_BACKEND` 覆盖 |
-| `det_model_dir`      | `models/ppocrv5/det.onnx`       | DB 文本检测模型；路径可写 `.onnx`，ACL 后端会自动替换为同名 `.om` |
-| `rec_model_dir`      | `models/ppocrv5/rec.onnx`       | SVTR_LCNet 文本识别模型；ACL 后端会自动替换为同名 `.om` |
+| `det_model_dir`      | `models/ppocrv6/det.onnx`       | PP-OCRv6 small DB 文本检测模型；ACL 后端会自动替换为同名 `.om` |
+| `rec_model_dir`      | `models/ppocrv6/rec.onnx`       | PP-OCRv6 small 文本识别模型；ACL 后端会自动替换为同名 `.om` |
 | `cls_model_dir`      | `models/ppocrv5/cls.onnx`       | 文本方向(0/180)分类模型；ACL 后端会自动替换为同名 `.om` |
-| `rec_char_dict_path` | `models/ppocrv5/ppocrv5_dict.txt` | 识别字符字典                |
-| `det_db_box_thresh`  | `0.3`                           | DB 检测框置信度阈值           |
+| `doc_orientation_model_dir` | `models/doc_orientation/inference.onnx` | PP-LCNet_x1_0_doc_ori 0/90/180/270 分类模型 |
+| `rec_char_dict_path` | `models/ppocrv6/ppocrv6_dict.txt` | 与 v6 rec 输出对应的 18708 字符字典 |
+| `det_db_thresh`      | `0.2`                           | PP-OCRv6 small DB 二值化阈值 |
+| `det_db_box_thresh`  | `0.45`                          | PP-OCRv6 small DB 检测框阈值 |
+| `det_db_unclip_ratio`| `1.4`                           | PP-OCRv6 small DB 文本框扩张比例 |
 | `det_box_type`       | `quad`                          | 检测框类型：`quad`（四点）/ `poly`（多边形） |
 
-ACL `.om` 后端会从模型输入 shape 自动推导预处理尺寸和 batch。例如当前远端 OCR `.om` 为：`det [1,3,960,960]`、`rec [1,3,48,320]`、`cls [1,3,80,160]`，代码会自动把 det resize 到固定尺寸，并把 rec/cls batch 限制为 1。
+模型目录被 `.gitignore` 忽略，克隆后需要另行放入上述文件。Windows ONNX Runtime 已验证；香橙派 `auto` 后端会查找同路径同名 `.om`，因此 v6 det/rec 与 doc orientation 上板前仍需完成 OM 转换和板端验证。
+
+四方向回归测试会自动生成每张 crop 的 0/90/180/270 版本，并保存 crop、方向校正图、检测框、各文字框和 CSV/JSON 汇总：
+
+```powershell
+python tools/test_ocr_rotation.py --input-dir testdata/ocr/book_crops --manifest testdata/ocr/book_crops/manifest.csv --baseline-config config/ocr/paddle_v5.yaml --v6-no-orientation-config config/ocr/paddle_v6_no_orientation.yaml --config config/ocr/paddle.yaml --output-dir runs/ocr_rotation_comparison
+```
 
 > `class_registry.ocr_templates` 每一项是该类别的关键词集合串（例如「数学书」对应「高等数学线性代数函数…」）；OCR 把书上所有文字拼成一串后，与这些模板做模糊匹配，取相似度最高者。要新增/调整书本类别，需同时改 `class_registry` 的 `result_classes` / `result_class_to_goal_id` / `ocr_output_classes` / `ocr_templates`。
 

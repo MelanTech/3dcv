@@ -3,12 +3,18 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Iterable, Tuple
 
 from core.utils.platform import is_orangepi
 
 
 SUPPORTED_BACKENDS = {"auto", "acl", "onnx"}
+MODEL_PATH_KEYS = (
+    "det_model_dir",
+    "rec_model_dir",
+    "cls_model_dir",
+    "doc_orientation_model_dir",
+)
 
 
 def resolve_paddleocr_backend(config: Dict) -> str:
@@ -43,12 +49,15 @@ def resolve_model_path(model_path: str, backend: str) -> Path:
     return path
 
 
-def resolve_engine_config(config: Dict) -> Tuple[str, Dict]:
+def resolve_engine_config(
+    config: Dict,
+    model_keys: Iterable[str] = MODEL_PATH_KEYS,
+) -> Tuple[str, Dict]:
     """返回解析后的后端名和引擎配置副本。"""
     resolved = dict(config)
     backend = resolve_paddleocr_backend(resolved)
     resolved["backend"] = backend
-    for key in ("det_model_dir", "rec_model_dir", "cls_model_dir"):
+    for key in model_keys:
         if key in resolved:
             resolved[key] = str(resolve_model_path(str(resolved[key]), backend))
     if "rec_char_dict_path" in resolved:
