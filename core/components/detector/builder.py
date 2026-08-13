@@ -31,4 +31,12 @@ def build_detector(config: dict, _round_name: str, class_registry: Optional[Dict
 
         return build_yoloe26_detector(config)
 
+    if detector_type == "yolo26":
+        if class_registry is None:
+            raise ValueError(f"{detector_type} requires class_registry config")
+
+        from core.components.detector.yolo26.detector import build_yolo26_detector
+
+        return build_yolo26_detector(config, class_registry)
+
     raise ValueError(f"unsupported detector type: {detector_type}")

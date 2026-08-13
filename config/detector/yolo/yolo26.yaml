@@ -1,0 +1,22 @@
+detector:
+  type: yolo26
+  backend: auto
+  weights: models/yolo26s_2025_2026
+  input_width: 640
+  input_height: 640
+  pad_value: 114
+  conf_thresh: 0.25
+  nms_thresh: 0.7
+  max_det: 300
+  max_nms: 30000
+  max_wh: 7680
+  agnostic_nms: false
+  # auto: detect raw Ultralytics head or end-to-end/NMS output.
+  # raw: force xywh + class-scores postprocess.
+  # end2end: force xyxy + score + class output parsing.
+  output_format: auto
+  graph_optimization_level: ORT_ENABLE_ALL
+  providers:
+    - CoreMLExecutionProvider
+    - CPUExecutionProvider
+
