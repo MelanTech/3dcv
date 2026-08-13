@@ -1,0 +1,23 @@
+ocr:
+  type: paddleocrv6
+  version: ppocrv6-small
+  use_angle_cls: true
+  use_doc_orientation: true
+  doc_orientation_min_confidence: 0.8
+  use_gpu: false
+
+  enlarge: 1.0
+  min_match_score: 60.0
+  min_text_length: 2
+
+  engine:
+    backend: auto
+    det_model_dir: models/ppocrv6/det.onnx
+    rec_model_dir: models/ppocrv6/rec.onnx
+    cls_model_dir: models/ppocrv5/cls.onnx
+    doc_orientation_model_dir: models/doc_orientation/inference.onnx
+    rec_char_dict_path: models/ppocrv6/ppocrv6_dict.txt
+    det_db_thresh: 0.2
+    det_db_box_thresh: 0.45
+    det_db_unclip_ratio: 1.4
+    det_box_type: quad
