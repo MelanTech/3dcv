@@ -21,9 +21,17 @@ filter:
     filtering:
       keep_table: true
       use_support_point: true
+      # 脚点真实深度比桌面平面交点远出该阈值(米)时，判定为紧邻桌子的地面物品并过滤；
+      # 桌面上的高叠物品脚点仍贴合平面，不受影响。<=0 关闭。
+      ground_reject_gap_m: 0.05
+      ground_reject_band_ratio: 0.15      # 脚点深度取 bbox 底部该比例高度的横带（兼容斜放物体）
+      ground_reject_near_percentile: 25.0 # 用该较近分位数代表脚点深度，抑制透出背景的远端噪声
+      ground_reject_max_gap_m: 0.25       # gap 超过该上限视为深度读取失败，不据此过滤；<=0 关闭
+      reproject_recover: true             # 交点落桌外时用真实深度反投影中心复核，纠正高/边缘物体横向漂移
+      reproject_min_height_m: 0.08         # 复核只对真实高度超过该值(米)的高物体启用，避免误救桌外物品
 
     visualization:
-      enabled: false
+      enabled: true
       window:
         width: 640
         height: 480
@@ -32,6 +40,10 @@ filter:
       show_detection_boxes: true
       detection_box_depth_mode: median
       table_box_height_m: 0.06
+      point_size: 6.0            # 标记点/点云渲染尺寸，放大便于观察
+      color_by_keep: true        # 标记点按过滤结果染色：绿=保留，红=被过滤
+      line_width: 4.0            # bbox / 桌面范围线框宽度
+      show_labels: true          # 在 bbox 上方显示物品类别文字标签
 
     plane_fit:
       enabled: true

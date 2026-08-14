@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import time
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -91,6 +92,34 @@ class DepthFilter(BaseFilter):
         )
         self.use_support_point = bool(
             read(filtering_config, "use_support_point", True)
+        )
+        # 支撑点落地判定：脚点真实深度比桌面平面交点远出该阈值(米)时，
+        # 认为物体站在紧邻桌子的地面而非桌面上，改用真实脚点参与过滤。
+        # <=0 时关闭该校验，退回纯平面投影（旧行为）。
+        self.support_point_ground_reject_gap_m = float(
+            read(filtering_config, "ground_reject_gap_m", 0.0)
+        )
+        # 脚点深度采样：从 bbox 底部该比例高度的横带内取深度（兼容斜放物体）。
+        self.support_point_band_ratio = float(
+            read(filtering_config, "ground_reject_band_ratio", 0.15)
+        )
+        # 用该较近分位数代表脚点深度，抑制透出背景的远端噪声。
+        self.support_point_near_percentile = float(
+            read(filtering_config, "ground_reject_near_percentile", 25.0)
+        )
+        # gap 合理性上限(米)：超过则视为深度读取失败，不据此过滤。<=0 关闭。
+        self.support_point_ground_reject_max_gap_m = float(
+            read(filtering_config, "ground_reject_max_gap_m", 0.25)
+        )
+        # 方案 A：support_point 交点落桌外时，用物体真实深度反投影的中心复核落脚位置，
+        # 纠正高/边缘物体因射线角度导致的横向漂移误过滤。
+        self.support_point_reproject_recover = bool(
+            read(filtering_config, "reproject_recover", True)
+        )
+        # 复核只对高物体启用：真实中心高出桌面平面超过该阈值(米)才复核，
+        # 矮物体射线漂移小、无需复核，可避免误救桌外物品。<=0 表示不限高度。
+        self.support_point_reproject_min_height_m = float(
+            read(filtering_config, "reproject_min_height_m", 0.08)
         )
         self.visualize = bool(
             read(visualization_config, "enabled", False, "visualize")
@@ -304,6 +333,18 @@ class DepthFilter(BaseFilter):
         self.show_detection_boxes = bool(
             read(visualization_config, "show_detection_boxes", True)
         )
+        self.viz_point_size = float(
+            read(visualization_config, "point_size", 3.0)
+        )
+        self.viz_color_by_keep = bool(
+            read(visualization_config, "color_by_keep", True)
+        )
+        self.viz_line_width = float(
+            read(visualization_config, "line_width", 3.0)
+        )
+        self.viz_show_labels = bool(
+            read(visualization_config, "show_labels", True)
+        )
         self.detection_box_depth_mode = read(
             visualization_config,
             "detection_box_depth_mode",
@@ -311,30 +352,25 @@ class DepthFilter(BaseFilter):
         )
         if self.detection_box_depth_mode not in ("median", "center"):
             raise ValueError("depth_filter.detection_box_depth_mode must be median or center")
-        if self.visualize:
-            import open3d as o3d
 
-            self.intrinsic = o3d.camera.PinholeCameraIntrinsic(
-                width=self.intrinsic_config["width"],
-                height=self.intrinsic_config["height"],
-                fx=self.fx,
-                fy=self.fy,
-                cx=self.cx,
-                cy=self.cy,
-            )
-            self.visualizer = o3d.visualization.VisualizerWithKeyCallback()
-            self.visualizer.create_window(
-                window_name="Depth Filter Point Cloud",
-                width=self.window_width,
-                height=self.window_height,
-            )
-            self.point_cloud = o3d.geometry.PointCloud()
-            self.coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
-                size=0.2,
-                origin=[-0.1, 0.0, -0.1],
-            )
-            self.markers_pcd = o3d.geometry.PointCloud()
-            self.detection_boxes = o3d.geometry.LineSet()
+        # O3D GUI 相关句柄。
+        self._o3d = None
+        self._gui = None
+        self._rendering = None
+        self.window = None
+        self.scene_widget = None
+        self._pause_button = None
+        self._labels = []
+        self.link_lines = None
+        self._geom_added = set()
+        self._line_material = None
+        self._point_material = None
+        self._marker_material = None
+        self._viz_paused = False
+        self._viz_step = False
+
+        if self.visualize:
+            self._init_o3d_visualizer()
 
         self.first_frame = True
         rot_z = self._rotation_matrix_z(np.pi)
@@ -1222,6 +1258,13 @@ class DepthFilter(BaseFilter):
             intersection = self._table_plane_intersection_cam(support_x, support_y)
             if intersection is not None:
                 point_cam, depth_m = intersection
+                grounded = self._support_point_on_ground(
+                    depth_image, clipped, depth_m
+                )
+                if grounded is not None:
+                    # 脚点真实深度明显落在桌面平面之后：物体站在地面而非桌面，
+                    # 用真实脚点参与过滤（其桌面 y 会落在平面之下而被剔除）。
+                    return grounded, float(grounded[2]), clipped
                 return point_cam, depth_m, clipped
 
         return self.get_object_3d_coordinates(
@@ -1229,6 +1272,68 @@ class DepthFilter(BaseFilter):
             clipped,
             allow_table_plane_fallback=True,
         )
+
+    def _support_point_on_ground(
+        self,
+        depth_image: np.ndarray,
+        clipped: Tuple[int, int, int, int],
+        plane_depth_m: float,
+    ) -> Optional[np.ndarray]:
+        """脚点真实深度明显落在桌面平面之后时，返回真实脚点的相机 3D 坐标。
+
+        用于区分"站在桌面上的高叠物品"（脚点贴合平面，深度差≈0）与"紧邻桌子
+        的地面物品"（脚点在延伸平面之后，深度明显更大）。阈值 <=0 时禁用。
+
+        为兼容斜放/不规则物体（bbox 底边中心可能落在空角、透出背景），这里在
+        bbox 底部横带内取深度，用较近分位数代表脚点——物体本体一定比其后方背景
+        更近，取近端可避开落空读到的背景假远值。
+        """
+        if self.support_point_ground_reject_gap_m <= 0.0:
+            return None
+
+        x1, y1, x2, y2 = clipped
+        height, width = depth_image.shape[:2]
+        box_height = max(1, y2 - y1)
+        # 底部横带：取 bbox 下缘一段高度（至少几像素）。
+        band_h = max(3, int(round(box_height * self.support_point_band_ratio)))
+        band_y1 = max(0, min(height - 1, y2 - band_h))
+        band_y2 = min(height, y2)
+        band_x1 = max(0, x1)
+        band_x2 = min(width, x2)
+        if band_y2 <= band_y1 or band_x2 <= band_x1:
+            return None
+
+        region = depth_image[band_y1:band_y2, band_x1:band_x2]
+        valid = region[region > 0]
+        if self.depth_trunc_m > 0:
+            valid = valid[valid <= self.depth_trunc_m * 1000.0]
+        if valid.size < self.object_depth_min_valid_pixels:
+            return None
+
+        # 用较近分位数代表脚点深度，抑制透出背景的远端噪声。
+        real_depth_m = float(np.percentile(valid, self.support_point_near_percentile)) / 1000.0
+        gap = real_depth_m - plane_depth_m
+        if gap <= self.support_point_ground_reject_gap_m:
+            return None
+        # 合理性上限：过大的 gap 多半是脚点深度读取失败（落空到远处背景），
+        # 不足以据此判为地面物品，避免误杀桌面物品。
+        if (
+            self.support_point_ground_reject_max_gap_m > 0.0
+            and gap > self.support_point_ground_reject_max_gap_m
+        ):
+            return None
+
+        support_x = (band_x1 + band_x2) // 2
+        support_y = max(0, band_y2 - 1)
+        ray = np.array(
+            [
+                (float(support_x) - self.cx) / self.fx,
+                (float(support_y) - self.cy) / self.fy,
+                1.0,
+            ],
+            dtype=np.float64,
+        )
+        return (ray * real_depth_m).astype(np.float64)
 
     def find_table_center(
         self,
@@ -1469,18 +1574,10 @@ class DepthFilter(BaseFilter):
             return []
 
         if self.visualizer is not None:
-            updated_bbox = self.create_table_bounding_box(table_range)
-            if self.table_bbox is None:
-                self.table_bbox = updated_bbox
-                self.visualizer.add_geometry(
-                    self.table_bbox,
-                    reset_bounding_box=False,
-                )
-            else:
-                self.table_bbox.points = updated_bbox.points
-                self.table_bbox.lines = updated_bbox.lines
-                self.table_bbox.colors = updated_bbox.colors
-                self.visualizer.update_geometry(self.table_bbox)
+            self.table_bbox = self.create_table_bounding_box(table_range)
+            self._refresh_geometry(
+                "table_range", self.table_bbox, self._line_material
+            )
 
         x_min = table_range["x_min"] - 0.02
         x_max = table_range["x_max"] + 0.02
@@ -1494,30 +1591,65 @@ class DepthFilter(BaseFilter):
         radius_z = max(1e-6, float(table_range.get("radius_z", (z_max - z_min) / 2.0)))
 
         filtered: List[Detection] = []
+        fp_params = {
+            "x_min": x_min, "x_max": x_max, "z_min": z_min, "z_max": z_max,
+            "y_min": y_min, "footprint": footprint,
+            "center_x": center_x, "center_z": center_z,
+            "radius_x": radius_x, "radius_z": radius_z,
+        }
         for detection, center in zip(detections, centers_world):
             if self._is_table(detection):
                 if self.keep_table:
                     filtered.append(detection)
                 continue
 
-            extra_margin = self._vertical_footprint_extra_margin(center, y_min)
-            local_x_min = x_min - extra_margin
-            local_x_max = x_max + extra_margin
-            local_z_min = z_min - extra_margin
-            local_z_max = z_max + extra_margin
-            in_x = local_x_min <= center[0] <= local_x_max
-            in_z = local_z_min <= center[2] <= local_z_max
-            if footprint == "ellipse":
-                norm_x = (center[0] - center_x) / (radius_x + 0.02 + extra_margin)
-                norm_z = (center[2] - center_z) / (radius_z + 0.02 + extra_margin)
-                in_footprint = norm_x * norm_x + norm_z * norm_z <= 1.0
-            else:
-                in_footprint = in_x and in_z
-            above_y = center[1] >= y_min
-            if in_footprint and above_y:
+            keep = self._center_in_footprint(center, fp_params)
+            # 方案 A：support_point 交点对高/边缘物体会横向漂移出桌面。
+            # 若主判定落到桌外，但物体框内有真实深度，则用真实深度反投影的
+            # (x,z) 复核——竖直物体真实中心的水平位置≈落脚点，不受射线角度影响。
+            # 仅对高物体复核（矮物体漂移小），避免误救桌外物品。
+            if not keep and self.support_point_reproject_recover:
+                fallback_center = self._real_depth_center_world(depth_image, detection.bbox)
+                if fallback_center is not None:
+                    height_above = float(fallback_center[1]) - float(y_min)
+                    if height_above >= self.support_point_reproject_min_height_m:
+                        keep = self._center_in_footprint(fallback_center, fp_params)
+            if keep:
                 filtered.append(detection)
 
         return filtered
+
+    def _center_in_footprint(self, center: np.ndarray, params: dict) -> bool:
+        """判断一个 3D 中心是否落在桌面 footprint 内（含垂直扩张与高度约束）。"""
+        extra_margin = self._vertical_footprint_extra_margin(center, params["y_min"])
+        local_x_min = params["x_min"] - extra_margin
+        local_x_max = params["x_max"] + extra_margin
+        local_z_min = params["z_min"] - extra_margin
+        local_z_max = params["z_max"] + extra_margin
+        if params["footprint"] == "ellipse":
+            norm_x = (center[0] - params["center_x"]) / (params["radius_x"] + 0.02 + extra_margin)
+            norm_z = (center[2] - params["center_z"]) / (params["radius_z"] + 0.02 + extra_margin)
+            in_footprint = norm_x * norm_x + norm_z * norm_z <= 1.0
+        else:
+            in_x = local_x_min <= center[0] <= local_x_max
+            in_z = local_z_min <= center[2] <= local_z_max
+            in_footprint = in_x and in_z
+        above_y = center[1] >= params["y_min"]
+        return bool(in_footprint and above_y)
+
+    def _real_depth_center_world(
+        self,
+        depth_image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+    ) -> Optional[np.ndarray]:
+        """用物体框内真实深度反投影出 3D 中心（桌面坐标系），用于复核落脚位置。"""
+        result = self.get_object_3d_coordinates(
+            depth_image, bbox, allow_table_plane_fallback=False
+        )
+        if result is None:
+            return None
+        center_cam, _, _ = result
+        return self.rotation_matrix @ center_cam + self.translation_vector
 
     def _vertical_footprint_extra_margin(self, center: np.ndarray, y_min: float) -> float:
         """按 table-y 高度把桌面 footprint 向外扩成倒置梯形/锥台。"""
@@ -1607,19 +1739,134 @@ class DepthFilter(BaseFilter):
         corners_cam = np.column_stack((x, y, z))
         return corners_cam @ self.rotation_matrix.T + self.translation_vector
 
+    def _init_o3d_visualizer(self) -> None:
+        """初始化 O3DVisualizer（支持真实线宽、3D 文字标签与工具栏暂停按钮）。"""
+        import open3d as o3d
+        from open3d.visualization import gui, rendering
+
+        self._o3d = o3d
+        self._gui = gui
+        self._rendering = rendering
+
+        self.intrinsic = o3d.camera.PinholeCameraIntrinsic(
+            width=self.intrinsic_config["width"],
+            height=self.intrinsic_config["height"],
+            fx=self.fx,
+            fy=self.fy,
+            cx=self.cx,
+            cy=self.cy,
+        )
+
+        gui.Application.instance.initialize()
+        # 自建窗口：一个铺满的 3D 视图 + 顶部两个小按钮，只保留暂停/步进。
+        self.window = gui.Application.instance.create_window(
+            "Depth Filter Point Cloud", self.window_width, self.window_height
+        )
+        self.scene_widget = gui.SceneWidget()
+        self.scene_widget.scene = rendering.Open3DScene(self.window.renderer)
+        self.scene_widget.scene.set_background([1.0, 1.0, 1.0, 1.0])
+        self.visualizer = self.scene_widget  # 几何操作走 SceneWidget.scene
+
+        # 材质：点云、标记点、粗线框。
+        self._point_material = rendering.MaterialRecord()
+        self._point_material.shader = "defaultUnlit"
+        self._point_material.point_size = self.viz_point_size
+
+        self._marker_material = rendering.MaterialRecord()
+        self._marker_material.shader = "defaultUnlit"
+        self._marker_material.point_size = self.viz_point_size * 3.0
+
+        self._line_material = rendering.MaterialRecord()
+        self._line_material.shader = "unlitLine"
+        self._line_material.line_width = self.viz_line_width
+
+        # 几何体容器。
+        self.point_cloud = o3d.geometry.PointCloud()
+        self.coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+            size=0.2, origin=[-0.1, 0.0, -0.1]
+        )
+        self.markers_pcd = o3d.geometry.PointCloud()
+        self.detection_boxes = o3d.geometry.LineSet()
+        self.link_lines = o3d.geometry.LineSet()
+
+        # 暂停/步进逻辑。
+        def _toggle_pause():
+            self._viz_paused = not self._viz_paused
+            self._pause_button.text = "Resume" if self._viz_paused else "Pause"
+            print(
+                "[DepthFilter viz] "
+                + ("PAUSED" if self._viz_paused else "RESUMED"),
+                flush=True,
+            )
+
+        def _step():
+            if self._viz_paused:
+                self._viz_step = True
+
+        # 顶部按钮条。
+        em = self.window.theme.font_size
+        self._pause_button = gui.Button("Pause")
+        self._pause_button.set_on_clicked(_toggle_pause)
+        step_button = gui.Button("Step")
+        step_button.set_on_clicked(_step)
+        button_bar = gui.Horiz(0.25 * em, gui.Margins(0.5 * em, 0.25 * em, 0.5 * em, 0.25 * em))
+        button_bar.add_child(self._pause_button)
+        button_bar.add_child(step_button)
+        button_bar.add_stretch()
+
+        self.window.add_child(self.scene_widget)
+        self.window.add_child(button_bar)
+
+        def _on_layout(ctx):
+            rect = self.window.content_rect
+            self.scene_widget.frame = rect
+            pref = button_bar.calc_preferred_size(ctx, gui.Widget.Constraints())
+            button_bar.frame = gui.Rect(
+                rect.x, rect.y, rect.width, pref.height
+            )
+
+        self.window.set_on_layout(_on_layout)
+
+        # 快捷键：空格暂停/继续，N/右方向键单步。
+        def _on_key(event):
+            if event.type == gui.KeyEvent.DOWN:
+                if event.key == gui.KeyName.SPACE:
+                    _toggle_pause()
+                    return gui.Widget.EventCallbackResult.HANDLED
+                if event.key in (gui.KeyName.N, gui.KeyName.RIGHT):
+                    _step()
+                    return gui.Widget.EventCallbackResult.HANDLED
+            return gui.Widget.EventCallbackResult.IGNORED
+
+        self.scene_widget.set_on_key(_on_key)
+
+    def _pump_gui(self) -> None:
+        """驱动一次 GUI 事件循环。"""
+        if self._gui is not None:
+            self._gui.Application.instance.run_one_tick()
+
+    def _refresh_geometry(self, name: str, geometry, material) -> None:
+        """按名添加/更新几何体（先 remove 再 add 才能刷新）。"""
+        scene = self.scene_widget.scene
+        if name in self._geom_added:
+            scene.remove_geometry(name)
+        scene.add_geometry(name, geometry, material)
+        self._geom_added.add(name)
+
     def _update_detection_box_visualization(
         self,
         depth_image: np.ndarray,
         detections: List[Detection],
-    ) -> None:
-        """在 Open3D 里渲染每个检测的 2D 框投影线框。"""
+    ) -> list:
+        """构建每个检测的 3D 框线框，并返回标签列表 [(位置, 文本, 颜色)]。"""
         if self.detection_boxes is None:
-            return
+            return []
         import open3d as o3d
 
         points = []
         lines = []
         colors = []
+        labels = []
         for detection in detections:
             corners = self._bbox_corners_world(depth_image, detection.bbox)
             if corners is None:
@@ -1638,6 +1885,10 @@ class DepthFilter(BaseFilter):
             )
             color = [0.0, 1.0, 1.0] if self._is_table(detection) else [1.0, 1.0, 0.0]
             colors.extend([color] * 5)
+            # 标签放在框的上边中点（前两个角的中点略微上抬）。
+            corners_arr = np.asarray(corners, dtype=np.float64)
+            label_pos = corners_arr[:2].mean(axis=0)
+            labels.append((label_pos, detection.class_name, color))
 
         self.detection_boxes.points = o3d.utility.Vector3dVector(
             np.asarray(points, dtype=np.float64).reshape((-1, 3))
@@ -1654,45 +1905,119 @@ class DepthFilter(BaseFilter):
             if colors
             else np.zeros((0, 3), dtype=np.float64)
         )
+        return labels
 
     def update_open3d_visualization(
         self,
         depth_image: np.ndarray,
         centers_world: np.ndarray,
         detections: List[Detection],
+        kept: Optional[List[Detection]] = None,
+        rgb_image: Optional[np.ndarray] = None,
     ) -> None:
         """（可选）刷新 open3d 点云与目标标记；未开启可视化时直接返回。"""
         if self.visualizer is None:
             return
         import open3d as o3d
 
-        depth_u16 = np.ascontiguousarray(depth_image.astype(np.uint16))
-        o3d_depth = o3d.geometry.Image(depth_u16)
-        point_cloud = o3d.geometry.PointCloud.create_from_depth_image(
-            o3d_depth,
-            self.intrinsic,
-            depth_scale=1000.0,
-            depth_trunc=self.depth_trunc_m,
-            stride=self.point_cloud_stride,
+        stride = max(1, int(self.point_cloud_stride))
+        depth_sub = np.ascontiguousarray(depth_image[::stride, ::stride].astype(np.uint16))
+        sub_intrinsic = o3d.camera.PinholeCameraIntrinsic(
+            width=depth_sub.shape[1],
+            height=depth_sub.shape[0],
+            fx=self.fx / stride,
+            fy=self.fy / stride,
+            cx=self.cx / stride,
+            cy=self.cy / stride,
         )
+        o3d_depth = o3d.geometry.Image(depth_sub)
+
+        if rgb_image is not None:
+            # frame.rgb 已是 RGB 顺序，直接用于点云上色。
+            rgb_sub = np.ascontiguousarray(rgb_image[::stride, ::stride, :3].astype(np.uint8))
+            if rgb_sub.shape[:2] == depth_sub.shape[:2]:
+                rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
+                    o3d.geometry.Image(rgb_sub),
+                    o3d_depth,
+                    depth_scale=1000.0,
+                    depth_trunc=self.depth_trunc_m,
+                    convert_rgb_to_intensity=False,
+                )
+                point_cloud = o3d.geometry.PointCloud.create_from_rgbd_image(
+                    rgbd, sub_intrinsic
+                )
+            else:
+                point_cloud = o3d.geometry.PointCloud.create_from_depth_image(
+                    o3d_depth, sub_intrinsic, depth_scale=1000.0,
+                    depth_trunc=self.depth_trunc_m,
+                )
+        else:
+            point_cloud = o3d.geometry.PointCloud.create_from_depth_image(
+                o3d_depth, sub_intrinsic, depth_scale=1000.0,
+                depth_trunc=self.depth_trunc_m,
+            )
         point_cloud.transform(self.transform_matrix)
         self.point_cloud.points = point_cloud.points
         self.point_cloud.colors = point_cloud.colors
 
         if centers_world.shape[0] > 0:
             self.markers_pcd.points = o3d.utility.Vector3dVector(centers_world)
-            red = np.tile(
-                np.array([[1.0, 0.0, 0.0]]),
-                (centers_world.shape[0], 1),
-            )
-            self.markers_pcd.colors = o3d.utility.Vector3dVector(red)
+            if self.viz_color_by_keep and kept is not None:
+                # 绿=保留（在桌面上），红=被过滤（判为桌外/地面）。
+                kept_ids = {id(det) for det in kept}
+                marker_colors = np.array(
+                    [
+                        [0.0, 1.0, 0.0] if id(det) in kept_ids else [1.0, 0.0, 0.0]
+                        for det in detections
+                    ],
+                    dtype=np.float64,
+                ).reshape((-1, 3))
+            else:
+                marker_colors = np.tile(
+                    np.array([[1.0, 0.0, 0.0]]),
+                    (centers_world.shape[0], 1),
+                )
+            self.markers_pcd.colors = o3d.utility.Vector3dVector(marker_colors)
         else:
             empty = np.zeros((0, 3))
             self.markers_pcd.points = o3d.utility.Vector3dVector(empty)
             self.markers_pcd.colors = o3d.utility.Vector3dVector(empty)
 
+        # bbox 中心 ↔ 对应 footprint point 的连线。
+        link_points = []
+        link_lines = []
+        if self.link_lines is not None and centers_world.shape[0] > 0:
+            for idx, detection in enumerate(detections):
+                if self._is_table(detection):
+                    continue
+                corners = self._bbox_corners_world(depth_image, detection.bbox)
+                if corners is None:
+                    continue
+                box_center = np.asarray(corners, dtype=np.float64).mean(axis=0)
+                base = len(link_points)
+                link_points.append(box_center.tolist())
+                link_points.append(centers_world[idx].tolist())
+                link_lines.append([base, base + 1])
+        if self.link_lines is not None:
+            self.link_lines.points = o3d.utility.Vector3dVector(
+                np.asarray(link_points, dtype=np.float64).reshape((-1, 3))
+                if link_points
+                else np.zeros((0, 3), dtype=np.float64)
+            )
+            self.link_lines.lines = o3d.utility.Vector2iVector(
+                np.asarray(link_lines, dtype=np.int32).reshape((-1, 2))
+                if link_lines
+                else np.zeros((0, 2), dtype=np.int32)
+            )
+            if link_lines:
+                # 连线用醒目的洋红色。
+                self.link_lines.colors = o3d.utility.Vector3dVector(
+                    np.tile(np.array([[1.0, 0.0, 1.0]]), (len(link_lines), 1))
+                )
+
+        labels = []
         if self.show_detection_boxes:
-            self._update_detection_box_visualization(depth_image, detections)
+            labels = self._update_detection_box_visualization(depth_image, detections)
         elif self.detection_boxes is not None:
             empty_points = np.zeros((0, 3), dtype=np.float64)
             empty_lines = np.zeros((0, 2), dtype=np.int32)
@@ -1700,22 +2025,43 @@ class DepthFilter(BaseFilter):
             self.detection_boxes.lines = o3d.utility.Vector2iVector(empty_lines)
             self.detection_boxes.colors = o3d.utility.Vector3dVector(empty_points)
 
-        if self.first_frame:
-            self.visualizer.add_geometry(self.point_cloud)
-            self.visualizer.add_geometry(self.coordinate_frame)
-            self.visualizer.add_geometry(self.markers_pcd)
-            if self.detection_boxes is not None:
-                self.visualizer.add_geometry(self.detection_boxes, reset_bounding_box=False)
-            self.first_frame = False
-        else:
-            self.visualizer.update_geometry(self.point_cloud)
-            self.visualizer.update_geometry(self.coordinate_frame)
-            self.visualizer.update_geometry(self.markers_pcd)
-            if self.detection_boxes is not None:
-                self.visualizer.update_geometry(self.detection_boxes)
+        # 按名刷新几何体。
+        self._refresh_geometry("point_cloud", self.point_cloud, self._point_material)
+        self._refresh_geometry("coord_frame", self.coordinate_frame, self._point_material)
+        self._refresh_geometry("markers", self.markers_pcd, self._marker_material)
+        if self.detection_boxes is not None and len(self.detection_boxes.lines) > 0:
+            self._refresh_geometry("det_boxes", self.detection_boxes, self._line_material)
+        elif "det_boxes" in self._geom_added:
+            self.scene_widget.scene.remove_geometry("det_boxes")
+            self._geom_added.discard("det_boxes")
+        if self.link_lines is not None and len(self.link_lines.lines) > 0:
+            self._refresh_geometry("link_lines", self.link_lines, self._line_material)
+        elif "link_lines" in self._geom_added:
+            self.scene_widget.scene.remove_geometry("link_lines")
+            self._geom_added.discard("link_lines")
 
-        self.visualizer.poll_events()
-        self.visualizer.update_renderer()
+        # 3D 文字标签：每帧清空重建。
+        for handle in self._labels:
+            self.scene_widget.remove_3d_label(handle)
+        self._labels = []
+        if self.viz_show_labels:
+            for position, text, _color in labels:
+                self._labels.append(
+                    self.scene_widget.add_3d_label(position, str(text))
+                )
+
+        if self.first_frame:
+            bounds = self.scene_widget.scene.bounding_box
+            self.scene_widget.setup_camera(60.0, bounds, bounds.get_center())
+            self.first_frame = False
+        self.window.post_redraw()
+
+        self._pump_gui()
+        # 暂停态：持续泵 GUI 事件（保持可旋转/缩放/按按钮），直到继续或单步。
+        while self._viz_paused and not self._viz_step:
+            self._pump_gui()
+            time.sleep(0.01)
+        self._viz_step = False
 
     def process(
         self,
@@ -1752,15 +2098,23 @@ class DepthFilter(BaseFilter):
         else:
             centers_array = np.zeros((0, 3), dtype=np.float64)
 
-        self.update_open3d_visualization(depth_image, centers_array, valid_detections)
-        return self.filter_objects_on_table_cached(
+        kept = self.filter_objects_on_table_cached(
             valid_detections,
             centers_array,
             depth_image,
         )
+        self.update_open3d_visualization(
+            depth_image, centers_array, valid_detections, kept, frame.rgb
+        )
+        return kept
 
     def close(self) -> None:
         """关闭可视化窗口，释放 open3d 资源。"""
-        if self.visualizer is not None:
-            self.visualizer.destroy_window()
+        if self.window is not None:
+            try:
+                self.window.close()
+            except Exception:
+                pass
+            self.window = None
+            self.scene_widget = None
             self.visualizer = None
