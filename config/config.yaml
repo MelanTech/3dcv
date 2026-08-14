@@ -39,5 +39,5 @@ mixins:
   - !include unknown_merger/default.yaml
   - !include table_locator/default.yaml
   - !include filter/depth_filter.yaml
-  - !include ocr/paddle.yaml
+  - !include ocr/paddleocrv6.yaml
   - !include counter/bayesian.yaml

@@ -48,6 +48,7 @@ tmp/
 temp/
 models/
 scripts/
+tests/
 
 # Local environment files
 .env
