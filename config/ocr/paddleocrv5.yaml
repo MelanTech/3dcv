@@ -3,7 +3,7 @@ ocr:
   use_angle_cls: true
   use_gpu: false
   enlarge: 1.0
-  min_match_score: 0.0
+  min_match_score: 50.0
 
   engine:
     backend: auto

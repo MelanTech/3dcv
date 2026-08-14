@@ -6,7 +6,7 @@ ocr:
   use_gpu: false
 
   enlarge: 1.0
-  min_match_score: 60.0
+  min_match_score: 50.0
   min_text_length: 2
 
   engine:
