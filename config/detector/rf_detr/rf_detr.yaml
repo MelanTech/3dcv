@@ -1,0 +1,29 @@
+detector:
+  type: rf_detr
+  # auto: Orange Pi/Ascend uses the same-name .om; other platforms use .onnx.
+  backend: auto
+  weights: models/rf-detr/rf-detr_2025_2026
+
+  # Must match the fixed shape used by the exported model.
+  input_size: 640
+  input_color: rgb
+  normalization_mean: [0.485, 0.456, 0.406]
+  normalization_std: [0.229, 0.224, 0.225]
+
+  conf_thresh: 0.3
+  # Official postprocess selects top Q query/class pairs before thresholding.
+  num_select: 300
+  drop_background: true
+  strict_class_count: true
+
+  # OM conversion may rewrite output names; positional fallback remains
+  # dets (normalized cxcywh), then labels (raw logits).
+  output_order:
+    - dets
+    - labels
+
+  graph_optimization_level: ORT_ENABLE_ALL
+  # The exported transformer graph is split across many CoreML/CPU partitions
+  # on macOS; pure CPU is faster and has negligible session warm-up.
+  providers:
+    - CPUExecutionProvider

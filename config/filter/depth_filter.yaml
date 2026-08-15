@@ -31,7 +31,7 @@ filter:
       reproject_min_height_m: 0.08         # 复核只对真实高度超过该值(米)的高物体启用，避免误救桌外物品
 
     visualization:
-      enabled: true
+      enabled: false
       window:
         width: 640
         height: 480

@@ -39,4 +39,22 @@ def build_detector(config: dict, _round_name: str, class_registry: Optional[Dict
 
         return build_yolo26_detector(config, class_registry)
 
+    if detector_type in {"deim", "deimv2"}:
+        if class_registry is None:
+            raise ValueError(f"{detector_type} requires class_registry config")
+
+        from core.components.detector.deim.detector import build_deim_detector
+
+        return build_deim_detector(config, class_registry)
+
+    if detector_type in {"rf_detr", "rfdetr", "rf-detr"}:
+        if class_registry is None:
+            raise ValueError(f"{detector_type} requires class_registry config")
+
+        from core.components.detector.rf_detr.detector import (
+            build_rf_detr_detector,
+        )
+
+        return build_rf_detr_detector(config, class_registry)
+
     raise ValueError(f"unsupported detector type: {detector_type}")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Callable, TypeVar
 
 from core.components.frame_source.builder import build_frame_source

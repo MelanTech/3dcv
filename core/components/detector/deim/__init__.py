@@ -1,0 +1,1 @@
+"""DEIM detector component."""

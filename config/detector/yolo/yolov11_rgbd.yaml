@@ -1,7 +1,7 @@
 detector:
   type: yolov11_rgbd
   backend: auto
-  weights: models/yolov11s_rgbd_gated_2025_2026_copy_paste_new_2026
+  weights: models/yolov11_rgbd/yolov11s_rgbd_gated_2025_2026_copy_paste_new_2026
   input_width: 640
   input_height: 640
   depth_max_mm: 3000

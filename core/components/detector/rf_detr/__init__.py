@@ -1,0 +1,1 @@
+"""RF-DETR detector component."""

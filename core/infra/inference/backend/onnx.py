@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Mapping, Sequence
 
 import numpy as np
 
@@ -49,10 +49,39 @@ class OnnxBackend(BaseInferenceBackend):
             providers=providers,
             sess_options=sess_options,
         )
-        self.input_name = self.session.get_inputs()[0].name
+        self.input_names = [tensor.name for tensor in self.session.get_inputs()]
+        # 保留旧属性，避免外部单输入调用方依赖它。
+        self.input_name = self.input_names[0]
 
-    def execute(self, data: np.ndarray) -> List[np.ndarray]:
-        return self.session.run(None, {self.input_name: data})
+    def execute(
+        self,
+        data: np.ndarray | Sequence[np.ndarray] | Mapping[str, np.ndarray],
+    ) -> List[np.ndarray]:
+        if isinstance(data, Mapping):
+            feed = {str(name): np.asarray(value) for name, value in data.items()}
+            missing = [name for name in self.input_names if name not in feed]
+            if missing:
+                raise ValueError(
+                    "missing ONNX model inputs: " + ", ".join(missing)
+                )
+        elif isinstance(data, (list, tuple)):
+            if len(data) != len(self.input_names):
+                raise ValueError(
+                    f"ONNX model expects {len(self.input_names)} inputs "
+                    f"{self.input_names}, got {len(data)}"
+                )
+            feed = {
+                name: np.asarray(value)
+                for name, value in zip(self.input_names, data)
+            }
+        else:
+            if len(self.input_names) != 1:
+                raise ValueError(
+                    f"ONNX model expects multiple inputs {self.input_names}; "
+                    "pass a sequence or name-to-array mapping"
+                )
+            feed = {self.input_name: np.asarray(data)}
+        return self.session.run(None, feed)
 
     def close(self) -> None:
         self.session = None

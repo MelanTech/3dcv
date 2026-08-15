@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Mapping, Sequence
 
 import numpy as np
 
@@ -27,10 +27,34 @@ class AclBackend(BaseInferenceBackend):
         self._inputs = self._collect_tensor_infos(kind="input")
         self._outputs = self._collect_tensor_infos(kind="output")
 
-    def execute(self, data: np.ndarray) -> List[np.ndarray]:
+    def execute(
+        self,
+        data: np.ndarray | Sequence[np.ndarray] | Mapping[str, np.ndarray],
+    ) -> List[np.ndarray]:
         if self.model is None:
             raise RuntimeError("ACL model is not initialized")
-        return self.model.execute([data])
+        if isinstance(data, Mapping):
+            missing = [info.name for info in self._inputs if info.name not in data]
+            if missing:
+                raise ValueError(
+                    "missing ACL model inputs: " + ", ".join(missing)
+                )
+            inputs = [np.asarray(data[info.name]) for info in self._inputs]
+        elif isinstance(data, (list, tuple)):
+            if len(data) != len(self._inputs):
+                raise ValueError(
+                    f"ACL model expects {len(self._inputs)} inputs, got {len(data)}"
+                )
+            inputs = [np.asarray(value) for value in data]
+        else:
+            if len(self._inputs) != 1:
+                names = [info.name for info in self._inputs]
+                raise ValueError(
+                    f"ACL model expects multiple inputs {names}; "
+                    "pass a sequence or name-to-array mapping"
+                )
+            inputs = [np.asarray(data)]
+        return self.model.execute(inputs)
 
     def close(self) -> None:
         if self.model is not None:

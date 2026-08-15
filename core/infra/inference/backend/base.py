@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
-from typing import List
+from typing import Any, List, Mapping, Sequence
 
 import numpy as np
 
@@ -24,8 +23,11 @@ class BaseInferenceBackend(ABC):
     name: str
 
     @abstractmethod
-    def execute(self, data: np.ndarray) -> List[np.ndarray]:
-        """执行一次前向推理。"""
+    def execute(
+        self,
+        data: np.ndarray | Sequence[np.ndarray] | Mapping[str, np.ndarray],
+    ) -> List[np.ndarray]:
+        """执行一次前向推理，支持单输入或按名称/顺序提供的多输入。"""
         raise NotImplementedError
 
     @abstractmethod

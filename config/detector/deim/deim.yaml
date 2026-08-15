@@ -1,0 +1,31 @@
+detector:
+  type: deim
+  # auto: Orange Pi/Ascend uses the same-name .om; other platforms use .onnx.
+  # The extension-less prefix keeps deployment configs identical across hosts.
+  backend: auto
+  weights: models/deim/deim_s_2025_2026
+
+  # Preserve the 2025 DEIM export contract.
+  input_size: 640
+  input_color: rgb
+  pad_value: 0
+  normalization: none
+  target_size_dtype: int64
+
+  conf_thresh: 0.4
+  use_nms: true
+  nms_iou: 0.8
+  agnostic_nms: true
+  max_det: 300
+
+  # Used only when backend output names are unavailable (for example some OM
+  # conversions). Standard ONNX exports are normalized by output names.
+  output_order:
+    - labels
+    - boxes
+    - scores
+
+  graph_optimization_level: ORT_ENABLE_ALL
+  providers:
+    - CoreMLExecutionProvider
+    - CPUExecutionProvider

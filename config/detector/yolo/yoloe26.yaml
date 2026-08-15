@@ -1,7 +1,7 @@
 detector:
   type: yoloe26
   backend: auto
-  weights: models/yoloe-26s-book
+  weights: models/yoloe26/yoloe-26s-book
   output_class: UnknownOcrCandidate
   input_width: 640
   input_height: 640

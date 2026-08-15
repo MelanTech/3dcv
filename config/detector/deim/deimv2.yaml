@@ -1,0 +1,32 @@
+detector:
+  # DEIMv2 shares the DEIM runtime and differs through preprocessing config.
+  type: deimv2
+  backend: auto
+  weights: models/deimv2/deimv2_2025_2026
+
+  input_size: 640
+  input_color: rgb
+  pad_value: 0
+  # Official DEIMv2 S/M/L/X inference applies ImageNet normalization.
+  # Set to none for the HGNetv2 Atto/Femto/Pico/N variants.
+  normalization: imagenet
+  normalization_mean: [0.485, 0.456, 0.406]
+  normalization_std: [0.229, 0.224, 0.225]
+  target_size_dtype: int64
+
+  conf_thresh: 0.4
+  use_nms: true
+  nms_iou: 0.8
+  agnostic_nms: true
+  max_det: 300
+
+  output_order:
+    - labels
+    - boxes
+    - scores
+
+  graph_optimization_level: ORT_ENABLE_ALL
+  # The DINOv3 graph is fragmented into hundreds of CoreML/CPU partitions on
+  # macOS. Pure CPU is faster and avoids CoreAnalytics context-leak warnings.
+  providers:
+    - CPUExecutionProvider

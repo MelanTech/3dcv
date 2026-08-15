@@ -1,7 +1,7 @@
 detector:
   type: yolov11
   backend: auto
-  weights: models/yolov11s_2025_2026
+  weights: models/yolov11/yolov11s_2025_2026
   input_width: 640
   input_height: 640
   conf_thresh: 0.1

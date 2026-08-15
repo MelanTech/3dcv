@@ -423,6 +423,72 @@ END
 | `graph_optimization_level`     | `ORT_ENABLE_ALL`                                  | ONNX Runtime 图优化级别（onnx 后端）                                                                                |
 | `providers`                    | `[CoreMLExecutionProvider, CPUExecutionProvider]` | ONNX Runtime 的 execution provider 优先级列表                                                                    |
 
+DEIM 使用 [config/detector/deim/deim.yaml](config/detector/deim/deim.yaml)，对应
+[DeimDetector](core/components/detector/deim/detector.py)。该实现从 2025 项目迁移，
+但已适配当前统一 `BaseDetector` / `Detection` / ONNX-ACL backend 架构。模型为双输入：
+`images`（float32 NCHW）与 `orig_target_sizes`（int64 `[height, width]`），输出为
+`labels / boxes / scores`。启用方式是把 [config.yaml](config/config.yaml) 中 detector
+include 替换为：
+
+```yaml
+- !include detector/deim/deim.yaml
+```
+
+DEIMv2 与 V1 的导出接口、输出解码和坐标还原一致，因此共用同一个
+`DeimDetector`；切换为 V2 时使用：
+
+```yaml
+- !include detector/deim/deimv2.yaml
+```
+
+两者主要区别是预处理：V1 以及 DEIMv2 的 Atto/Femto/Pico/N 只缩放到 `[0,1]`
+（`normalization: none`）；DEIMv2 的 S/M/L/X 按官方推理脚本额外使用 ImageNet
+mean/std 归一化（`normalization: imagenet`）。仓库自带的 V2 权重包含 DINOv3
+backbone，因此其配置默认使用 `imagenet`。
+
+DEIM 的 `weights` 同样使用不含扩展名的路径前缀；`backend: auto` 时普通平台加载同名
+`.onnx`，香橙派加载同名 `.om`，也可通过 `3DCV_DEIM_BACKEND=onnx|acl` 覆盖。ONNX 与
+OM 必须由同一个固定输入尺寸、相同输出顺序的模型转换得到。DEIM 额外配置：
+
+| 键 | 示例 | 说明 |
+| --- | --- | --- |
+| `input_size` | `640` | 等比缩放并居中填充后的正方形输入尺寸 |
+| `input_color` | `rgb` | 模型输入通道顺序；当前帧源统一输出 RGB，也可设为 `bgr` 兼容旧权重 |
+| `pad_value` | `0` | letterbox 填充值；默认保留 2025 DEIM 行为 |
+| `normalization` | `none` / `imagenet` | V1/轻量 V2 使用 `none`；V2 S/M/L/X 使用 ImageNet mean/std |
+| `target_size_dtype` | `int64` | `orig_target_sizes` 输入类型，需与导出模型一致 |
+| `conf_thresh` | `0.4` | 置信度阈值 |
+| `use_nms` / `nms_iou` | `true` / `0.8` | 是否执行 NMS 及其 IoU 阈值 |
+| `agnostic_nms` | `true` | 是否做类别无关 NMS，默认保留旧实现行为 |
+| `output_order` | `[labels, boxes, scores]` | OM 输出名不可用时的顺序兜底；ONNX 优先按输出名解析 |
+
+RF-DETR 使用
+[config/detector/rf\_detr/rf\_detr.yaml](config/detector/rf_detr/rf_detr.yaml)，对应
+[RfDetrDetector](core/components/detector/rf_detr/detector.py)。启用方式：
+
+```yaml
+- !include detector/rf_detr/rf_detr.yaml
+```
+
+RF-DETR 官方导出模型是单输入 raw-output 模型：输入为 `input [B,3,H,W]`，输出为
+`dets [B,Q,4]`（归一化 `cxcywh`）和 `labels [B,Q,C+1]`（未激活 logits，最后一列
+是 no-object）。实现严格遵循官方导出 helper：RGB 直接 resize 到模型尺寸（不做
+letterbox）、ImageNet mean/std 归一化、删除背景列、对每个类别独立做 sigmoid、将
+`Q×C` 展平后稳定取 top-k，再按置信度过滤并映射回原图 `xyxy`。一个 query 可以对多个
+类别产生候选，因此不能用每个 query 的 `argmax` 替代 top-k。
+
+| 键 | 示例 | 说明 |
+| --- | --- | --- |
+| `backend` | `auto` | 普通平台用 `.onnx`，香橙派用同名 `.om`；可被 `3DCV_RF_DETR_BACKEND` 覆盖 |
+| `weights` | `models/rf-detr/rf-detr_2025_2026` | 不含扩展名的权重前缀 |
+| `input_size` | `640` | 固定 resize 输入尺寸，必须与导出模型 shape 一致 |
+| `normalization_mean/std` | ImageNet | 官方 RF-DETR 预处理归一化参数 |
+| `conf_thresh` | `0.3` | top-k 后的置信度阈值 |
+| `num_select` | `300` | 阈值过滤前最多选取的 query/class 对数量 |
+| `drop_background` | `true` | 删除 logits 最后一列隐式 no-object 类别 |
+| `strict_class_count` | `true` | 背景删除后的类别数必须与 `class_registry` 一致 |
+| `output_order` | `[dets, labels]` | OM 输出名不可用时的顺序兜底；按 shape 猜测存在三类别歧义，禁止作为首选 |
+
 RGBD 版本使用 [config/detector/yolo/yolov11_rgbd.yaml](config/detector/yolo/yolov11_rgbd.yaml)，
 对应 [YOLOv11RgbdDetector](core/components/detector/yolov11_rgbd/detector.py)。它与原
 `yolov11` detector 完全隔离，但后处理语义对齐 Ultralytics：`xywh2xyxy`、按类别偏移的
@@ -633,6 +699,8 @@ ACL `.om` 后端会从模型输入 shape 自动推导预处理尺寸和 batch。
 | -------------------------------- | -------------------------------------------------------- |
 | `3DCV_PLATFORM`                  | 覆盖平台探测结果（如 `macos` / `orangepi`），影响后端选择与 `base_paths` 解析 |
 | `3DCV_YOLO_BACKEND`              | 覆盖 YOLO 推理后端（`auto` / `onnx` / `acl`）                    |
+| `3DCV_DEIM_BACKEND`              | 覆盖 DEIM 推理后端（`auto` / `onnx` / `acl`）                    |
+| `3DCV_RF_DETR_BACKEND`           | 覆盖 RF-DETR 推理后端（`auto` / `onnx` / `acl`）                 |
 | `3DCV_OCR_BACKEND`               | 覆盖 PaddleOCR 推理后端（`auto` / `onnx` / `acl`）               |
 | `3DCV_RESULT_DIR`                | 覆盖裁判结果文件的落盘目录                                            |
 | `OPENNI2_REDIST` / `OPENNI2_LIB` | OpenNI2 库路径（`openni_lib=null` 时用于自动探测）                   |
