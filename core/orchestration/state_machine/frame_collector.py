@@ -1,9 +1,9 @@
 """帧采集器：在指定时间窗内从帧源拉取帧，支持时间缩放。"""
 from __future__ import annotations
 
-import time
 from typing import Iterator, List, Optional
 
+from core.infra import pause_clock
 from core.infra.logging.event_logger import EventLogger
 from core.types import Frame
 
@@ -23,13 +23,13 @@ class FrameCollector:
     def iter_frames(self, nominal_sec: float, reason: str) -> Iterator[Frame]:
         """在给定时间窗内逐帧产出；至少产出一帧，结束时记录采集统计。"""
         actual_sec = self.scaled_duration(nominal_sec)
-        started = time.monotonic()
+        started = pause_clock.now()
         deadline = started + actual_sec
         frame_count = 0
         source_exhausted = False
 
         try:
-            while time.monotonic() < deadline or frame_count == 0:
+            while pause_clock.now() < deadline or frame_count == 0:
                 try:
                     frame = next(self.frame_source)
                 except StopIteration:
@@ -40,7 +40,7 @@ class FrameCollector:
                 if actual_sec <= 0:
                     break
         finally:
-            elapsed = time.monotonic() - started
+            elapsed = pause_clock.now() - started
             self.logger.event(
                 "frames_collected",
                 reason=reason,
@@ -53,13 +53,13 @@ class FrameCollector:
 
     def iter_until(self, deadline: float, reason: str, nominal_sec: Optional[float] = None) -> Iterator[Frame]:
         """按绝对 monotonic deadline 逐帧产出；deadline 已过则不产出帧。"""
-        started = time.monotonic()
+        started = pause_clock.now()
         actual_sec = max(0.0, float(deadline) - started)
         frame_count = 0
         source_exhausted = False
 
         try:
-            while time.monotonic() < deadline:
+            while pause_clock.now() < deadline:
                 try:
                     frame = next(self.frame_source)
                 except StopIteration:
@@ -68,7 +68,7 @@ class FrameCollector:
                 frame_count += 1
                 yield frame
         finally:
-            elapsed = time.monotonic() - started
+            elapsed = pause_clock.now() - started
             self.logger.event(
                 "frames_collected",
                 reason=reason,

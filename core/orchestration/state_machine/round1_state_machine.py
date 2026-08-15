@@ -1,12 +1,12 @@
 """第一轮（round1）状态机：单桌识别流程。"""
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import List
 
 from core.components.frame_source.base import BaseFrameSource
 from core.components.referee.base import BaseRefereeClient
+from core.infra import pause_clock
 from core.infra.logging.event_logger import EventLogger
 from core.orchestration.pipeline.frame_pipeline import FramePipeline
 from core.orchestration.state_machine.base import BaseStateMachine
@@ -114,7 +114,7 @@ class Round1StateMachine(BaseStateMachine):
         max_acquire_sec = self.frame_collector.scaled_duration(
             self.state_config.get("max_acquire_sec", self.state_config["settle_wait_sec"])
         )
-        started = time.monotonic()
+        started = pause_clock.now()
         acquire_deadline = min(started + max_acquire_sec, deadline)
         acquired = False
         frame_count = 0
@@ -128,7 +128,7 @@ class Round1StateMachine(BaseStateMachine):
             ):
                 frame_count += 1
                 self.pipeline.track_frame(frame, table=table)
-                elapsed = time.monotonic() - started
+                elapsed = pause_clock.now() - started
                 if elapsed >= min_actual_sec and self.pipeline.table_locator.is_acquired:
                     acquired = True
                     break
@@ -142,7 +142,7 @@ class Round1StateMachine(BaseStateMachine):
             is_localized=self.pipeline.table_locator.is_localized,
             is_stable=self.pipeline.table_locator.is_stable,
             frame_count=frame_count,
-            elapsed_sec=time.monotonic() - started,
+            elapsed_sec=pause_clock.now() - started,
         )
         if not acquired:
             self.pipeline.table_locator.handle_acquire_timeout("acquire_timeout")

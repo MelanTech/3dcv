@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 
 from core.components.filter.base import BaseFilter
+from core.infra import pause_clock
 from core.types import Detection, Frame
 
 
@@ -2058,9 +2059,15 @@ class DepthFilter(BaseFilter):
 
         self._pump_gui()
         # 暂停态：持续泵 GUI 事件（保持可旋转/缩放/按按钮），直到继续或单步。
-        while self._viz_paused and not self._viz_step:
-            self._pump_gui()
-            time.sleep(0.01)
+        # 暂停期间通过 pause_clock 冻结轮次计时，避免观察过久触发计时退出。
+        if self._viz_paused and not self._viz_step:
+            pause_clock.begin_pause()
+            try:
+                while self._viz_paused and not self._viz_step:
+                    self._pump_gui()
+                    time.sleep(0.01)
+            finally:
+                pause_clock.end_pause()
         self._viz_step = False
 
     def process(

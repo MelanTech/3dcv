@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import time
 from typing import Callable, TypeVar
 
 from core.components.frame_source.builder import build_frame_source
@@ -12,6 +11,7 @@ from core.components.detector.builder import build_detector
 from core.components.filter.builder import build_filter
 from core.components.referee.builder import build_referee_client
 from core.infra.logging.event_logger import EventLogger
+from core.infra import pause_clock
 from core.components.ocr.builder import build_ocr
 from core.components.unknown_merger.builder import build_unknown_merger
 from core.orchestration.pipeline.frame_pipeline import FramePipeline
@@ -40,7 +40,7 @@ def _build_component(logger: EventLogger, name: str, factory: Callable[[], T]) -
 
 def run_round(config_path: str, round_name: RoundName) -> Path:
     """加载配置、按依赖顺序装配所有组件，然后把控制权交给轮次状态机。"""
-    round_started_at = time.monotonic()
+    round_started_at = pause_clock.now()
     config = load_config(config_path)
     logging_config = config["logging"]
 

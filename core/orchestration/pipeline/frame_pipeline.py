@@ -1,12 +1,12 @@
 """逐帧处理流水线：被各轮次状态机共用。"""
 from __future__ import annotations
 
-import time
 from typing import Dict, Iterable, List, Optional
 
 from core.components.counter.base import BaseCounter
 from core.components.detector.base import BaseDetector
 from core.components.filter.base import BaseFilter
+from core.infra import pause_clock
 from core.infra.logging.event_logger import EventLogger
 from core.components.ocr.base import BaseOcr
 from core.components.table_locator.base import BaseTableLocator
@@ -265,7 +265,7 @@ class FramePipeline:
             elapsed_sec=(
                 None
                 if self.round_started_at is None
-                else max(0.0, time.monotonic() - self.round_started_at)
+                else max(0.0, pause_clock.now() - self.round_started_at)
             ),
         )
 
