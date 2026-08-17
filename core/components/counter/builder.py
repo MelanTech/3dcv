@@ -15,4 +15,9 @@ def build_counter(config: dict, class_registry: Optional[Dict] = None) -> BaseCo
 
         return BayesianCounter(config, class_registry)
 
+    if counter_type == "tracker":
+        from core.components.counter.tracker_counter import TrackerCounter
+
+        return TrackerCounter(config, class_registry)
+
     raise ValueError(f"unsupported counter type: {counter_type}")
