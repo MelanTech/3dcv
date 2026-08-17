@@ -3,6 +3,6 @@ counter:
   max_object_count: 5
   total_max: 15
   iou_threshold: 0.3
-  center_dist_threshold: 200.0  # 追踪器空间抢救机制：中心点距离（像素）
+  center_dist_threshold: 50.0  # 追踪器空间抢救机制：中心点距离（像素）
   confirm_hits: 3
-  max_lost_frames: 30
+  max_lost_frames: 10
