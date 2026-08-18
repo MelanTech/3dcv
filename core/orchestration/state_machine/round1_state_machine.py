@@ -97,6 +97,7 @@ class Round1StateMachine(BaseStateMachine):
                 reason="normal",
                 strict=True,
             )
+            self._print_result_summary_table(self.results, reason="normal")
             self.logger.event("round_finished", round=self.round_name, result_path=str(result_path))
             self._normal_completion = True
             return result_path
@@ -171,6 +172,8 @@ class Round1StateMachine(BaseStateMachine):
                 exc_type=type(collect_exc).__name__,
             )
             items = self.results
+
+        self._print_result_summary_table(items, reason="interrupted")
 
         try:
             result_path = self._write_and_send_result(

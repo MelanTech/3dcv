@@ -15,7 +15,7 @@ ocr:
     det_model_dir: models/ppocrv6/det.onnx
     rec_model_dir: models/ppocrv6/rec.onnx
     cls_model_dir: models/ppocrv5/cls.onnx
-    doc_orientation_model_dir: models/doc_orientation/inference.onnx
+    doc_orientation_model_dir: models/ppocrv6/doc_orientation.onnx
     rec_char_dict_path: models/ppocrv6/ppocrv6_dict.txt
     det_db_thresh: 0.2
     det_db_box_thresh: 0.45

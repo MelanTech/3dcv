@@ -35,9 +35,9 @@ mixins:
   - !include frame_source/eval_videos.yaml
   - !include referee/disabled.yaml
   - !include class_registry/default.yaml
-  - !include detector/deim/deimv2.yaml
+  - !include detector/deim/deim.yaml
   - !include unknown_merger/default.yaml
   - !include table_locator/default.yaml
   - !include filter/depth_filter.yaml
-  - !include ocr/paddleocrv6.yaml
+  - !include ocr/paddleocrv5.yaml
   - !include counter/bayesian.yaml

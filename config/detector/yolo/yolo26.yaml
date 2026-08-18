@@ -1,7 +1,7 @@
 detector:
   type: yolo26
   backend: auto
-  weights: models/yolo26/yolo26s_2025_2026
+  weights: models/yolo26/yolo26s_2025_2026_sim
   input_width: 640
   input_height: 640
   pad_value: 114
