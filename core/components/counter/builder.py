@@ -20,4 +20,9 @@ def build_counter(config: dict, class_registry: Optional[Dict] = None) -> BaseCo
 
         return TrackerCounter(config, class_registry)
 
+    if counter_type == "consensus":
+        from core.components.counter.consensus_counter import ConsensusCounter
+
+        return ConsensusCounter(config, class_registry)
+
     raise ValueError(f"unsupported counter type: {counter_type}")
