@@ -4,6 +4,10 @@ ocr:
   use_gpu: false
   enlarge: 1.0
   min_match_score: 50.0
+  throttle:
+    enabled: true
+    interval_frames: 5
+    retry_interval_frames: 2
 
   engine:
     backend: auto
