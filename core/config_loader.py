@@ -1,4 +1,4 @@
-"""YAML 配置加载：支持通过本地 ``!include`` 引入并合并 mixin 配置。"""
+"""YAML 配置加载：支持本地 ``!include`` 与旧式 mixin 合并。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,8 +55,25 @@ def _load_yaml_file(path: Path) -> Dict[str, Any]:
     return data
 
 
+def _unwrap_same_key_includes(value):
+    """Allow ``detector: !include detector/foo.yaml`` with legacy wrapped files."""
+    if isinstance(value, list):
+        return [_unwrap_same_key_includes(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    unwrapped = {}
+    for key, child in value.items():
+        child = _unwrap_same_key_includes(child)
+        if isinstance(child, dict) and set(child) == {key}:
+            unwrapped[key] = _unwrap_same_key_includes(child[key])
+        else:
+            unwrapped[key] = child
+    return unwrapped
+
+
 def load_config(path: str) -> Dict[str, Any]:
-    """加载根配置，并把每个 include 进来的 mixin 作为独立的顶层域合并进来。"""
+    """加载根配置，兼容旧 ``mixins`` 与新显式组件 include 风格。"""
     config_path = Path(path).expanduser().resolve()
     root_config = _load_yaml_file(config_path)
 
@@ -84,4 +101,4 @@ def load_config(path: str) -> Dict[str, Any]:
             )
         merged[domain] = mixin[domain]
 
-    return merged
+    return _unwrap_same_key_includes(merged)

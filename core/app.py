@@ -114,6 +114,14 @@ def _close_component(logger: EventLogger, name: str, component) -> None:
         )
 
 
+def _filter_intrinsic_config(filter_config):
+    if isinstance(filter_config, dict):
+        if set(filter_config) == {"filter"}:
+            return _filter_intrinsic_config(filter_config["filter"])
+        return filter_config.get("intrinsic")
+    return None
+
+
 def run_round(config_path: str, round_name: RoundName) -> Path:
     """加载配置、按依赖顺序装配所有组件，然后把控制权交给轮次状态机。"""
     round_started_at = pause_clock.now()
@@ -193,7 +201,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
             logger.event(
                 "filter_intrinsic_selected",
                 source=frame_source.get_filter_intrinsic_source(),
-                intrinsic=filter_intrinsic or config["filter"].get("intrinsic"),
+                intrinsic=filter_intrinsic or _filter_intrinsic_config(config["filter"]),
             )
             filter_intrinsic_error = getattr(frame_source, "filter_intrinsic_error", None)
             if filter_intrinsic_error:

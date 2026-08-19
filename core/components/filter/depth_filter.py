@@ -29,6 +29,7 @@ class DepthFilter(BaseFilter):
         object_depth_config = filter_config.get("object_depth", {})
         visualization_config = filter_config.get("visualization", {})
         filtering_config = filter_config.get("filtering", {})
+        sticker_config = filter_config.get("sticker_filter", {})
         plane_fit_config = filter_config.get("plane_fit", {})
         footprint_config = filter_config.get("footprint", {})
         smoothing_config = filter_config.get("smoothing", {})
@@ -126,6 +127,25 @@ class DepthFilter(BaseFilter):
             read(visualization_config, "enabled", False, "visualize")
         )
         self.keep_table = bool(read(filtering_config, "keep_table", True))
+        self.sticker_filter_enabled = bool(
+            read(sticker_config, "enabled", False)
+        )
+        self.sticker_filter_classes = {
+            str(class_name)
+            for class_name in sticker_config.get("classes", [])
+        }
+        self.sticker_min_valid_depth_ratio = float(
+            read(sticker_config, "min_valid_depth_ratio", 0.25)
+        )
+        self.sticker_max_height_p90_m = float(
+            read(sticker_config, "max_height_p90_m", 0.012)
+        )
+        self.sticker_max_height_relief_m = float(
+            read(sticker_config, "max_height_relief_m", 0.010)
+        )
+        self.sticker_max_abs_median_height_m = float(
+            read(sticker_config, "max_abs_median_height_m", 0.012)
+        )
         self.depth_trunc_m = float(
             read(visualization_config, "depth_trunc_m", 2.0)
         )
@@ -1615,10 +1635,71 @@ class DepthFilter(BaseFilter):
                     height_above = float(fallback_center[1]) - float(y_min)
                     if height_above >= self.support_point_reproject_min_height_m:
                         keep = self._center_in_footprint(fallback_center, fp_params)
+            self._attach_depth_filter_evidence(
+                detection,
+                center,
+                keep,
+                fp_params,
+                depth_image,
+            )
+            if keep and self._is_table_sticker(detection):
+                detection.evidence.setdefault("sticker_filter", {}).update(
+                    {
+                        "filtered": True,
+                        "reason": "flat_on_table",
+                    }
+                )
+                continue
             if keep:
                 filtered.append(detection)
 
         return filtered
+
+    def _attach_depth_filter_evidence(
+        self,
+        detection: Detection,
+        center: np.ndarray,
+        keep: bool,
+        fp_params: dict,
+        depth_image: np.ndarray,
+    ) -> None:
+        """Attach lightweight table-space depth features for downstream filters."""
+        evidence = detection.evidence.setdefault("depth_filter", {})
+        evidence.update(
+            {
+                "kept": bool(keep),
+                "center_height_above_table_m": float(center[1]) - float(fp_params["y_min"]),
+                "footprint": str(fp_params.get("footprint", "rectangle")),
+                "table_model_source": str(self.table_model_source),
+            }
+        )
+        stats = self._bbox_table_height_stats(
+            depth_image,
+            detection.bbox,
+            table_y_min=float(fp_params["y_min"]),
+        )
+        if stats:
+            evidence.update(stats)
+
+    def _is_table_sticker(self, detection: Detection) -> bool:
+        """Return True for configured classes that look flat on the tabletop."""
+        if not self.sticker_filter_enabled:
+            return False
+        if detection.class_name not in self.sticker_filter_classes:
+            return False
+        evidence = detection.evidence.get("depth_filter")
+        if not isinstance(evidence, dict):
+            return False
+        valid_depth_ratio = float(evidence.get("valid_depth_ratio", 0.0))
+        height_p90 = float(evidence.get("height_p90_m", float("inf")))
+        height_relief = float(evidence.get("height_relief_m", float("inf")))
+        height_median = float(evidence.get("height_median_m", float("inf")))
+        return bool(
+            valid_depth_ratio >= self.sticker_min_valid_depth_ratio
+            and height_p90 <= self.sticker_max_height_p90_m
+            and height_relief <= self.sticker_max_height_relief_m
+            and abs(height_median) <= self.sticker_max_abs_median_height_m
+        )
 
     def _center_in_footprint(self, center: np.ndarray, params: dict) -> bool:
         """判断一个 3D 中心是否落在桌面 footprint 内（含垂直扩张与高度约束）。"""
@@ -1651,6 +1732,54 @@ class DepthFilter(BaseFilter):
             return None
         center_cam, _, _ = result
         return self.rotation_matrix @ center_cam + self.translation_vector
+
+    def _bbox_table_height_stats(
+        self,
+        depth_image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+        *,
+        table_y_min: float,
+    ) -> Dict[str, float]:
+        """Summarize valid bbox depth points in table-space height coordinates."""
+        height, width = depth_image.shape[:2]
+        self._ensure_ray_maps(width, height)
+        clipped = self._clip_bbox(bbox, width, height)
+        if clipped is None:
+            return {}
+
+        x1, y1, x2, y2 = clipped
+        region = depth_image[y1:y2, x1:x2]
+        total_pixels = int(region.size)
+        if total_pixels <= 0:
+            return {}
+        valid = region > 0
+        if self.depth_trunc_m > 0:
+            valid &= region <= self.depth_trunc_m * 1000.0
+        valid_count = int(np.count_nonzero(valid))
+        if valid_count < self.object_depth_min_valid_pixels:
+            return {
+                "valid_depth_ratio": float(valid_count / total_pixels),
+                "valid_depth_count": float(valid_count),
+            }
+
+        local_y, local_x = np.nonzero(valid)
+        pixel_x = local_x + x1
+        pixel_y = local_y + y1
+        depth_m = region[valid].astype(np.float64) / 1000.0
+        cam_x = self.ray_x_map[pixel_y, pixel_x] * depth_m
+        cam_y = self.ray_y_map[pixel_y, pixel_x] * depth_m
+        points_cam = np.column_stack((cam_x, cam_y, depth_m))
+        points_world = points_cam @ self.rotation_matrix.T + self.translation_vector
+        heights = points_world[:, 1] - float(table_y_min)
+        p10, p50, p90 = np.percentile(heights, [10.0, 50.0, 90.0])
+        return {
+            "valid_depth_ratio": float(valid_count / total_pixels),
+            "valid_depth_count": float(valid_count),
+            "height_p10_m": float(p10),
+            "height_median_m": float(p50),
+            "height_p90_m": float(p90),
+            "height_relief_m": float(p90 - p10),
+        }
 
     def _vertical_footprint_extra_margin(self, center: np.ndarray, y_min: float) -> float:
         """按 table-y 高度把桌面 footprint 向外扩成倒置梯形/锥台。"""
