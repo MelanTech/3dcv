@@ -15,6 +15,7 @@ from core.infra.logging.event_logger import EventLogger
 from core.infra import pause_clock
 from core.components.ocr.builder import build_ocr
 from core.components.unknown_merger.builder import build_unknown_merger
+from core.orchestration.pipeline.builder import build_detector_stage
 from core.orchestration.pipeline.frame_pipeline import FramePipeline
 from core.orchestration.state_machine.round1_state_machine import Round1StateMachine
 from core.orchestration.state_machine.round2_state_machine import Round2StateMachine
@@ -122,6 +123,18 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
             "visualizer",
             lambda: build_visualizer(config.get("visualization"), config.get("class_registry")),
         )
+        detector_stage = _build_component(
+            logger,
+            "detector_stage",
+            lambda: build_detector_stage(
+                detector=detector,
+                config=config.get("pipeline", {}).get("async_detector"),
+                detector_config=config["detector"],
+                class_registry=config.get("class_registry"),
+                round_name=round_name,
+                logger=logger,
+            ),
+        )
         pipeline = _build_component(
             logger,
             "pipeline",
@@ -137,6 +150,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                 log_per_frame=logging_config.get("per_frame", False),
                 ignored_by_counter=config.get("class_registry", {}).get("ignored_by_counter", []),
                 round_started_at=round_started_at,
+                detector_stage=detector_stage,
             ),
         )
 

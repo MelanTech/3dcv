@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from threading import Lock
 from typing import Dict, List, Mapping, Sequence
 
 import numpy as np
 
 from core.infra.inference.backend.base import BaseInferenceBackend, TensorInfo
+
+
+_ACL_EXECUTE_LOCK = Lock()
 
 
 class AclBackend(BaseInferenceBackend):
@@ -54,7 +58,14 @@ class AclBackend(BaseInferenceBackend):
                     "pass a sequence or name-to-array mapping"
                 )
             inputs = [np.asarray(data)]
-        return self.model.execute(inputs)
+        with _ACL_EXECUTE_LOCK:
+            resource = getattr(self.resource_manager, "resource", None)
+            context = getattr(resource, "context", None)
+            if context is not None:
+                ret = self._acl.rt.set_context(context)
+                if ret != 0:
+                    raise RuntimeError(f"acl.rt.set_context failed ret_int={ret}")
+            return self.model.execute(inputs)
 
     def close(self) -> None:
         if self.model is not None:

@@ -7,6 +7,12 @@ logging:
   console: true
   per_frame: false
 
+pipeline:
+  async_detector:
+    # OrangePi only: a spawned process owns an independent ACL detector context.
+    # The main process continues the prior frame's depth/OCR/counter stages.
+    enabled: true
+
 visualization:
   enabled: true
   type: opencv
@@ -39,5 +45,5 @@ mixins:
   - !include unknown_merger/default.yaml
   - !include table_locator/default.yaml
   - !include filter/depth_filter.yaml
-  - !include ocr/paddleocrv5.yaml
+  - !include ocr/paddleocrv6.yaml
   - !include counter/consensus.yaml

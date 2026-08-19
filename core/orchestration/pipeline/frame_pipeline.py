@@ -12,6 +12,11 @@ from core.components.ocr.base import BaseOcr
 from core.components.table_locator.base import BaseTableLocator
 from core.types import Detection, Frame, RecognitionItem
 from core.infra.visualization.base import BaseVisualizer
+from core.orchestration.pipeline.detector_stage import (
+    BaseDetectorStage,
+    DetectedFrame,
+    InlineDetectorStage,
+)
 from core.utils.box import bbox_iou
 
 
@@ -31,6 +36,7 @@ class FramePipeline:
         log_per_frame: bool = False,
         ignored_by_counter: Iterable[str] = (),
         round_started_at: Optional[float] = None,
+        detector_stage: Optional[BaseDetectorStage] = None,
     ):
         self.detector = detector
         self.table_locator = table_locator
@@ -44,6 +50,7 @@ class FramePipeline:
         self.ignored_by_counter = set(ignored_by_counter)
         self.current_state_name: Optional[str] = None
         self.round_started_at = round_started_at
+        self.detector_stage = detector_stage or InlineDetectorStage(detector)
 
     def set_state(self, state_name: str) -> None:
         """记录当前状态机状态名，供可视化 overlay 使用。"""
@@ -55,6 +62,7 @@ class FramePipeline:
 
     def reset_table_state(self) -> None:
         """清空不应从一个桌位/时间窗泄漏到下一个的状态。"""
+        self.flush()
         self.table_locator.clear()
         self.counter.clear()
         self.logger.event("pipeline_table_state_reset")
@@ -83,7 +91,26 @@ class FramePipeline:
 
     def process_frame(self, frame: Frame, table: int) -> Dict[str, int]:
         """处理单帧，并返回该桌位当前平滑后的计数结果。"""
-        detections = self.detector.infer(frame, table)
+        detected_frame = self.detector_stage.accept(frame, table)
+        if detected_frame is None:
+            return self.counter.get_counts()
+        return self._process_detected_frame(detected_frame)
+
+    def flush(self) -> Dict[str, int]:
+        """Process the last async detector result before committing counts."""
+        detected_frame = self.detector_stage.flush()
+        if detected_frame is None:
+            return self.counter.get_counts()
+        return self._process_detected_frame(detected_frame)
+
+    def _process_detected_frame(
+        self,
+        detected_frame: DetectedFrame,
+    ) -> Dict[str, int]:
+        """Run all pipeline stages after detector inference."""
+        frame = detected_frame.frame
+        table = detected_frame.table
+        detections = detected_frame.detections
         self._render(frame, detections, table, stage="detect")
         if self.log_per_frame:
             self.logger.event(
@@ -271,6 +298,10 @@ class FramePipeline:
 
     def close(self) -> None:
         """关闭流水线各组件持有的可选资源。"""
+        try:
+            self.flush()
+        finally:
+            self.detector_stage.close()
         self.visualizer.close()
         close_filter = getattr(self.table_filter, "close", None)
         if close_filter is not None:

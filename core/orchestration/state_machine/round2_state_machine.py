@@ -96,6 +96,12 @@ class Round2StateMachine(BaseStateMachine):
                             if self.log_per_frame:
                                 self.logger.event("latest_result_written", table=table, path=str(latest_path))
 
+                        self.pipeline.flush()
+                        latest_items = self.results + self.pipeline.get_items(table=table)
+                        latest_path = self.referee_client.write_result(self.round_number, latest_items)
+                        if self.log_per_frame:
+                            self.logger.event("latest_result_written", table=table, path=str(latest_path))
+
                         table_results = self.pipeline.get_items(table=table)
                         self.logger.event(
                             "table_window_processed",
