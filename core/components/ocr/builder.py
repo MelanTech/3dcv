@@ -13,31 +13,45 @@ def build_ocr(config: dict, class_registry: Optional[Dict] = None) -> BaseOcr:
     if ocr_type == "paddle":
         from core.components.ocr.paddle_ocr import PaddleOcr
 
-        return _maybe_throttle(
-            PaddleOcr(config, class_registry),
-            config,
-            class_registry,
-        )
+        return _wrap_ocr(PaddleOcr(config, class_registry), config, class_registry)
 
     if ocr_type == "paddleocrv5":
         from core.components.ocr.paddleocrv5.component import PaddleOcrV5
 
-        return _maybe_throttle(
-            PaddleOcrV5(config, class_registry),
-            config,
-            class_registry,
-        )
+        return _wrap_ocr(PaddleOcrV5(config, class_registry), config, class_registry)
 
     if ocr_type == "paddleocrv6":
         from core.components.ocr.paddleocrv6.component import PaddleOcrV6
 
-        return _maybe_throttle(
-            PaddleOcrV6(config, class_registry),
-            config,
-            class_registry,
-        )
+        return _wrap_ocr(PaddleOcrV6(config, class_registry), config, class_registry)
 
     raise ValueError(f"unsupported ocr type: {ocr_type}")
+
+
+def _wrap_ocr(
+    ocr: BaseOcr,
+    config: dict,
+    class_registry: Optional[Dict],
+) -> BaseOcr:
+    return _maybe_table_fallback(
+        _maybe_throttle(ocr, config, class_registry),
+        config,
+        class_registry,
+    )
+
+
+def _maybe_table_fallback(
+    ocr: BaseOcr,
+    config: dict,
+    class_registry: Optional[Dict],
+) -> BaseOcr:
+    fallback_config = config.get("table_fallback")
+    if not isinstance(fallback_config, dict) or not fallback_config.get("enabled", False):
+        return ocr
+
+    from core.components.ocr.table_fallback import TableFallbackOcr
+
+    return TableFallbackOcr(ocr, config, class_registry)
 
 
 def _maybe_throttle(
