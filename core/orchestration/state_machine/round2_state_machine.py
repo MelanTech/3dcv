@@ -29,6 +29,7 @@ class Round2StateMachine(BaseStateMachine):
         referee_client: BaseRefereeClient,
         logger: EventLogger,
         round_started_at: float,
+        start_signal_sent: bool = False,
     ):
         self.config = config
         self.frame_source = frame_source
@@ -36,6 +37,7 @@ class Round2StateMachine(BaseStateMachine):
         self.referee_client = referee_client
         self.logger = logger
         self.round_started_at = float(round_started_at)
+        self.start_signal_sent = bool(start_signal_sent)
         self.state_config = config["state_machine"]
         self.log_per_frame = bool(config.get("logging", {}).get("per_frame", False))
         self.frame_collector = FrameCollector(frame_source, logger, self.state_config["time_scale"])
@@ -55,13 +57,16 @@ class Round2StateMachine(BaseStateMachine):
             with StateLogger(self.logger, "INIT"):
                 pass
 
-            with StateLogger(self.logger, "CONNECT_REFEREE"):
-                if not self.referee_client.connect():
-                    raise RuntimeError("failed to connect referee box")
+            if not self.start_signal_sent:
+                with StateLogger(self.logger, "CONNECT_REFEREE"):
+                    if not self.referee_client.connect():
+                        raise RuntimeError("failed to connect referee box")
 
-            with StateLogger(self.logger, "SEND_START"):
-                if not self.referee_client.send_start():
-                    raise RuntimeError("failed to send start signal")
+                with StateLogger(self.logger, "SEND_START"):
+                    if not self.referee_client.send_start():
+                        raise RuntimeError("failed to send start signal")
+            else:
+                self.logger.event("start_signal_already_sent")
 
             with StateLogger(self.logger, "INIT_PIPELINE"):
                 self.pipeline.reset_table_state()
