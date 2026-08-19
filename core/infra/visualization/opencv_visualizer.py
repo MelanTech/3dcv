@@ -36,7 +36,10 @@ class OpenCvVisualizer(BaseVisualizer):
         self.overlay_text_scale = float(config.get("overlay_text_scale", 0.45))
         self.overlay_line_height = int(config.get("overlay_line_height", 18))
         self.fps_smoothing = min(0.99, max(0.0, float(config.get("fps_smoothing", 0.8))))
-        self.stages = set(config.get("stages", ["preview", "track", "final"]))
+        stages = config.get("stages", ["preview", "track", "final"])
+        if stages is None:
+            stages = []
+        self.stages = {str(stage) for stage in stages}
         self.stage_windows = len(self.stages) > 1
         self.open_windows = set()
         self._last_frame_key: Optional[Tuple[int, str]] = None

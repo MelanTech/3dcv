@@ -27,14 +27,18 @@ visualization:
   overlay_text_scale: 0.45
   overlay_line_height: 18
   fps_smoothing: 0.8
+  count_gui:
+    enabled: true
+    window_name: 3DCV Counts
+    fps_smoothing: 0.8
   stages: # Available stages: preview, detect, track, locate, filter, ocr, final.
     # - preview
-    - detect
+    # - detect
     # - track
     # - locate
     # - filter
     # - ocr
-    - final
+    # - final
 
 mixins:
   - !include state_machine/default.yaml

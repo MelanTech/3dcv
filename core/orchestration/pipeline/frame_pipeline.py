@@ -12,6 +12,7 @@ from core.components.ocr.base import BaseOcr
 from core.components.table_locator.base import BaseTableLocator
 from core.types import Detection, Frame, RecognitionItem
 from core.infra.visualization.base import BaseVisualizer
+from core.infra.visualization.count_gui import BaseCountGui, NoopCountGui
 from core.orchestration.pipeline.detector_stage import (
     BaseDetectorStage,
     DetectedFrame,
@@ -32,6 +33,7 @@ class FramePipeline:
         counter: BaseCounter,
         visualizer: BaseVisualizer,
         logger: EventLogger,
+        count_gui: Optional[BaseCountGui] = None,
         unknown_merger=None,
         log_per_frame: bool = False,
         ignored_by_counter: Iterable[str] = (),
@@ -44,12 +46,14 @@ class FramePipeline:
         self.ocr = ocr
         self.counter = counter
         self.visualizer = visualizer
+        self.count_gui = count_gui or NoopCountGui()
         self.logger = logger
         self.unknown_merger = unknown_merger
         self.log_per_frame = bool(log_per_frame)
         self.ignored_by_counter = set(ignored_by_counter)
         self.current_state_name: Optional[str] = None
         self.round_started_at = round_started_at
+        self._is_closing = False
         self.detector_stage = detector_stage or InlineDetectorStage(detector)
 
     def set_state(self, state_name: str) -> None:
@@ -88,19 +92,20 @@ class FramePipeline:
                 is_stable=self.table_locator.is_stable,
                 detection_count=len(detections),
             )
+        self._publish_counts(self.counter.get_counts())
 
     def process_frame(self, frame: Frame, table: int) -> Dict[str, int]:
         """处理单帧，并返回该桌位当前平滑后的计数结果。"""
         detected_frame = self.detector_stage.accept(frame, table)
         if detected_frame is None:
-            return self.counter.get_counts()
+            return self._publish_counts(self.counter.get_counts())
         return self._process_detected_frame(detected_frame)
 
     def flush(self) -> Dict[str, int]:
         """Process the last async detector result before committing counts."""
         detected_frame = self.detector_stage.flush()
         if detected_frame is None:
-            return self.counter.get_counts()
+            return self._publish_counts(self.counter.get_counts())
         return self._process_detected_frame(detected_frame)
 
     def _process_detected_frame(
@@ -134,7 +139,7 @@ class FramePipeline:
         if not self.table_locator.is_localized:
             # 桌面区域尚未定位时，过滤/计数结果不可靠，直接返回当前计数。
             self._render(frame, detections, table, stage="final")
-            return self.counter.get_counts()
+            return self._publish_counts(self.counter.get_counts())
 
         if self.unknown_merger is not None:
             unknown_candidates = self.unknown_merger.infer(frame, detections, table)
@@ -190,6 +195,15 @@ class FramePipeline:
                 frame_id=frame.frame_id,
                 counts=counts,
             )
+        return self._publish_counts(counts)
+
+    def _publish_counts(self, counts: Dict[str, int]) -> Dict[str, int]:
+        """Refresh the count panel and convert its exit action into graceful stop."""
+        if self._is_closing:
+            return counts
+        if self.count_gui.update(counts):
+            self.logger.event("count_gui_exit_requested", counts=counts)
+            raise KeyboardInterrupt("count GUI exit requested")
         return counts
 
     def get_items(self, table: int) -> List[RecognitionItem]:
@@ -298,10 +312,12 @@ class FramePipeline:
 
     def close(self) -> None:
         """关闭流水线各组件持有的可选资源。"""
+        self._is_closing = True
         try:
             self.flush()
         finally:
             self.detector_stage.close()
+        self.count_gui.close()
         self.visualizer.close()
         close_filter = getattr(self.table_filter, "close", None)
         if close_filter is not None:

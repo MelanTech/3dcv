@@ -20,6 +20,7 @@ from core.orchestration.pipeline.frame_pipeline import FramePipeline
 from core.orchestration.state_machine.round1_state_machine import Round1StateMachine
 from core.orchestration.state_machine.round2_state_machine import Round2StateMachine
 from core.components.table_locator.builder import build_table_locator
+from core.infra.visualization.count_gui_builder import build_count_gui
 from core.infra.visualization.builder import build_visualizer
 
 
@@ -123,6 +124,15 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
             "visualizer",
             lambda: build_visualizer(config.get("visualization"), config.get("class_registry")),
         )
+        count_gui = _build_component(
+            logger,
+            "count_gui",
+            lambda: build_count_gui(
+                config.get("visualization", {}).get("count_gui"),
+                config.get("class_registry"),
+                logger,
+            ),
+        )
         detector_stage = _build_component(
             logger,
             "detector_stage",
@@ -145,6 +155,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                 ocr=ocr,
                 counter=counter,
                 visualizer=visualizer,
+                count_gui=count_gui,
                 logger=logger,
                 unknown_merger=unknown_merger,
                 log_per_frame=logging_config.get("per_frame", False),
