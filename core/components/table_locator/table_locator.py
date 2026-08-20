@@ -289,6 +289,9 @@ class TableLocator(BaseTableLocator):
                     self.using_default_bbox = False
                     self.last_update_frame = self.current_frame
                     self._is_stable = self._candidate_is_stable(best_candidate)
+                elif self.current_frame - self.last_update_frame >= self.update_interval:
+                    self._try_update_bbox(table_detections)
+                    self.last_update_frame = self.current_frame
             elif self.current_frame - self.last_update_frame >= self.update_interval:
                 self._try_update_bbox(table_detections)
                 self.last_update_frame = self.current_frame
