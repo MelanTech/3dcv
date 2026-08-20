@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import time
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 
 CountRow = tuple[tuple[str, ...], str]
@@ -13,8 +13,14 @@ class BaseCountGui(ABC):
     """Runtime count display with a cooperative exit request."""
 
     @abstractmethod
-    def update(self, counts: Dict[str, int]) -> bool:
-        """Refresh counts and return whether a graceful exit was requested."""
+    def update(
+        self,
+        counts: Dict[str, int],
+        *,
+        elapsed_sec: Optional[float] = None,
+        table: Optional[int] = None,
+    ) -> bool:
+        """Refresh runtime status and return whether a graceful exit was requested."""
         raise NotImplementedError
 
     @abstractmethod
@@ -26,7 +32,13 @@ class BaseCountGui(ABC):
 class NoopCountGui(BaseCountGui):
     """Disabled count panel."""
 
-    def update(self, _counts: Dict[str, int]) -> bool:
+    def update(
+        self,
+        _counts: Dict[str, int],
+        *,
+        elapsed_sec: Optional[float] = None,
+        table: Optional[int] = None,
+    ) -> bool:
         return False
 
     def close(self) -> None:
@@ -70,8 +82,30 @@ class TkCountGui(BaseCountGui):
             column=1,
             sticky="e",
         )
+        tk.Label(container, text="Time", anchor="w", width=18).grid(
+            row=1,
+            column=0,
+            sticky="w",
+        )
+        self._elapsed_value = tk.StringVar(value="-")
+        tk.Label(container, textvariable=self._elapsed_value, anchor="e", width=7).grid(
+            row=1,
+            column=1,
+            sticky="e",
+        )
+        tk.Label(container, text="Table", anchor="w", width=18).grid(
+            row=2,
+            column=0,
+            sticky="w",
+        )
+        self._table_value = tk.StringVar(value="-")
+        tk.Label(container, textvariable=self._table_value, anchor="e", width=7).grid(
+            row=2,
+            column=1,
+            sticky="e",
+        )
         self._values = {}
-        for row, (count_keys, display_name) in enumerate(self._rows, start=1):
+        for row, (count_keys, display_name) in enumerate(self._rows, start=3):
             tk.Label(container, text=display_name, anchor="w", width=18).grid(
                 row=row,
                 column=0,
@@ -91,16 +125,24 @@ class TkCountGui(BaseCountGui):
             command=self._request_exit,
             width=10,
         ).grid(
-            row=len(self._rows) + 1,
+            row=len(self._rows) + 3,
             column=0,
             columnspan=2,
             pady=(10, 0),
         )
 
-    def update(self, counts: Dict[str, int]) -> bool:
+    def update(
+        self,
+        counts: Dict[str, int],
+        *,
+        elapsed_sec: Optional[float] = None,
+        table: Optional[int] = None,
+    ) -> bool:
         if self._closed:
             return True
         self._update_fps()
+        self._elapsed_value.set(self._format_elapsed(elapsed_sec))
+        self._table_value.set("-" if table is None else str(int(table)))
         for count_keys, value in self._values.items():
             count = sum(int(counts.get(key, 0)) for key in count_keys)
             value.set(str(max(0, count)))
@@ -118,6 +160,16 @@ class TkCountGui(BaseCountGui):
             self._root.destroy()
         except self._tk.TclError:
             pass
+
+    @staticmethod
+    def _format_elapsed(elapsed_sec: Optional[float]) -> str:
+        if elapsed_sec is None:
+            return "-"
+        elapsed = max(0.0, float(elapsed_sec))
+        minutes = int(elapsed // 60)
+        seconds = int(elapsed % 60)
+        tenths = int((elapsed - int(elapsed)) * 10)
+        return f"{minutes:02d}:{seconds:02d}.{tenths}"
 
     def _request_exit(self) -> None:
         self._exit_requested = True

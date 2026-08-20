@@ -52,6 +52,7 @@ class FramePipeline:
         self.log_per_frame = bool(log_per_frame)
         self.ignored_by_counter = set(ignored_by_counter)
         self.current_state_name: Optional[str] = None
+        self.current_table: Optional[int] = None
         self.round_started_at = round_started_at
         self._is_closing = False
         self.detector_stage = detector_stage or InlineDetectorStage(detector)
@@ -67,16 +68,19 @@ class FramePipeline:
     def reset_table_state(self) -> None:
         """清空不应从一个桌位/时间窗泄漏到下一个的状态。"""
         self.flush()
+        self.current_table = None
         self.table_locator.clear()
         self.counter.clear()
         self.logger.event("pipeline_table_state_reset")
 
     def preview_frame(self, frame: Frame, table: int) -> None:
         """仅渲染一帧，不改变识别状态。"""
+        self.current_table = int(table)
         self._render(frame, [], table, stage="preview")
 
     def track_frame(self, frame: Frame, table: int) -> None:
         """只更新桌面定位状态；用于 round2 的桌面锁定（acquire）阶段。"""
+        self.current_table = int(table)
         self._render(frame, [], table, stage="preview")
         detections = self.detector.infer(frame, table)
         self._render(frame, detections, table, stage="detect")
@@ -92,13 +96,14 @@ class FramePipeline:
                 is_stable=self.table_locator.is_stable,
                 detection_count=len(detections),
             )
-        self._publish_counts(self.counter.get_counts())
+        self._publish_counts(self.counter.get_counts(), table=table)
 
     def process_frame(self, frame: Frame, table: int) -> Dict[str, int]:
         """处理单帧，并返回该桌位当前平滑后的计数结果。"""
+        self.current_table = int(table)
         detected_frame = self.detector_stage.accept(frame, table)
         if detected_frame is None:
-            return self._publish_counts(self.counter.get_counts())
+            return self._publish_counts(self.counter.get_counts(), table=table)
         return self._process_detected_frame(detected_frame)
 
     def flush(self) -> Dict[str, int]:
@@ -116,6 +121,7 @@ class FramePipeline:
         frame = detected_frame.frame
         table = detected_frame.table
         detections = detected_frame.detections
+        self.current_table = int(table)
         self._render(frame, detections, table, stage="detect")
         if self.log_per_frame:
             self.logger.event(
@@ -139,7 +145,7 @@ class FramePipeline:
         if not self.table_locator.is_localized:
             # 桌面区域尚未定位时，过滤/计数结果不可靠，直接返回当前计数。
             self._render(frame, detections, table, stage="final")
-            return self._publish_counts(self.counter.get_counts())
+            return self._publish_counts(self.counter.get_counts(), table=table)
 
         if self.unknown_merger is not None:
             unknown_candidates = self.unknown_merger.infer(frame, detections, table)
@@ -195,13 +201,23 @@ class FramePipeline:
                 frame_id=frame.frame_id,
                 counts=counts,
             )
-        return self._publish_counts(counts)
+        return self._publish_counts(counts, table=table)
 
-    def _publish_counts(self, counts: Dict[str, int]) -> Dict[str, int]:
+    def _publish_counts(
+        self,
+        counts: Dict[str, int],
+        table: Optional[int] = None,
+    ) -> Dict[str, int]:
         """Refresh the count panel and convert its exit action into graceful stop."""
         if self._is_closing:
             return counts
-        if self.count_gui.update(counts):
+        if table is not None:
+            self.current_table = int(table)
+        if self.count_gui.update(
+            counts,
+            table=self.current_table,
+            elapsed_sec=self._elapsed_sec(),
+        ):
             self.logger.event("count_gui_exit_requested", counts=counts)
             raise KeyboardInterrupt("count GUI exit requested")
         return counts
@@ -303,12 +319,13 @@ class FramePipeline:
             table,
             stage=stage,
             state_name=self.current_state_name,
-            elapsed_sec=(
-                None
-                if self.round_started_at is None
-                else max(0.0, pause_clock.now() - self.round_started_at)
-            ),
+            elapsed_sec=self._elapsed_sec(),
         )
+
+    def _elapsed_sec(self) -> Optional[float]:
+        if self.round_started_at is None:
+            return None
+        return max(0.0, pause_clock.now() - self.round_started_at)
 
     def close(self) -> None:
         """关闭流水线各组件持有的可选资源。"""
