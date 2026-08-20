@@ -33,12 +33,12 @@ visualization:
     fps_smoothing: 0.8
   stages: # Available stages: preview, detect, track, locate, filter, ocr, final.
     # - preview
-    - detect
+#    - detect
     # - track
     # - locate
     # - filter
     # - ocr
-    - final
+#    - final
 
 state_machine: !include state_machine/default.yaml
 frame_source: !include frame_source/eval_videos.yaml
