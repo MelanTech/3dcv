@@ -13,6 +13,7 @@ from core.components.table_locator.base import BaseTableLocator
 from core.types import Detection, Frame, RecognitionItem
 from core.infra.visualization.base import BaseVisualizer
 from core.infra.visualization.count_gui import BaseCountGui, NoopCountGui
+from core.infra.visualization.noop_visualizer import NoopVisualizer
 from core.orchestration.pipeline.detector_stage import (
     BaseDetectorStage,
     DetectedFrame,
@@ -55,6 +56,7 @@ class FramePipeline:
         self.current_table: Optional[int] = None
         self.round_started_at = round_started_at
         self._is_closing = False
+        self._displays_closed = False
         self.detector_stage = detector_stage or InlineDetectorStage(detector)
 
     def set_state(self, state_name: str) -> None:
@@ -327,15 +329,24 @@ class FramePipeline:
             return None
         return max(0.0, pause_clock.now() - self.round_started_at)
 
+    def close_displays(self) -> None:
+        """Close UI windows immediately while keeping non-UI runtime resources alive."""
+        if self._displays_closed:
+            return
+        self._displays_closed = True
+        self.count_gui.close()
+        self.visualizer.close()
+        self.count_gui = NoopCountGui()
+        self.visualizer = NoopVisualizer()
+
     def close(self) -> None:
         """关闭流水线各组件持有的可选资源。"""
         self._is_closing = True
+        self.close_displays()
         try:
             self.flush()
         finally:
             self.detector_stage.close()
-        self.count_gui.close()
-        self.visualizer.close()
         close_filter = getattr(self.table_filter, "close", None)
         if close_filter is not None:
             close_filter()

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 import queue
 import traceback
 from typing import Any, Dict, List, Optional
@@ -17,6 +18,13 @@ from core.orchestration.pipeline.detector_stage import (
     DetectedFrame,
 )
 from core.types import Detection, Frame
+
+
+def _close_timeout(env_name: str, default: float) -> float:
+    try:
+        return max(0.0, float(os.environ.get(env_name, default)))
+    except (TypeError, ValueError):
+        return default
 
 
 def _detector_worker(
@@ -126,13 +134,20 @@ class ProcessDetectorStage(BaseDetectorStage):
         self._closed = True
         if self._process.is_alive():
             try:
-                self._requests.put(("close",), timeout=1.0)
+                self._requests.put(
+                    ("close",),
+                    timeout=_close_timeout("CV3D_DETECTOR_WORKER_CLOSE_PUT_TIMEOUT_SEC", 0.2),
+                )
             except queue.Full:
                 pass
-            self._process.join(timeout=5.0)
+            self._process.join(
+                timeout=_close_timeout("CV3D_DETECTOR_WORKER_CLOSE_JOIN_TIMEOUT_SEC", 0.5)
+            )
             if self._process.is_alive():
                 self._process.terminate()
-                self._process.join(timeout=2.0)
+                self._process.join(
+                    timeout=_close_timeout("CV3D_DETECTOR_WORKER_TERMINATE_JOIN_TIMEOUT_SEC", 0.5)
+                )
         self._requests.close()
         self._responses.close()
         if self._frame_slots is not None:

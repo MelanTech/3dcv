@@ -95,6 +95,7 @@ class Round1StateMachine(BaseStateMachine):
                     self.pipeline.clear_state()
 
             with StateLogger(self.logger, "COMMIT_TABLE_1", table=1):
+                self.pipeline.close_displays()
                 self.results = self.pipeline.get_items(table=1)
                 self.logger.event(
                     "table_committed",
@@ -166,6 +167,7 @@ class Round1StateMachine(BaseStateMachine):
 
     def _finalize_interrupted_run(self, exc: BaseException) -> None:
         """被中断（如 Ctrl+C）时，尽最大努力保存并上报当前已有结果。"""
+        self.pipeline.close_displays()
         self.logger.event(
             "round_interrupted",
             round=self.round_name,

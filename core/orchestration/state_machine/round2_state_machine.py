@@ -137,6 +137,7 @@ class Round2StateMachine(BaseStateMachine):
                     with StateLogger(self.logger, "RESET_TABLE_STATE", next_table=table + 1):
                         self.pipeline.reset_table_state()
 
+            self.pipeline.close_displays()
             result_path = self._write_and_send_result(
                 self.results,
                 reason="normal",
@@ -208,6 +209,7 @@ class Round2StateMachine(BaseStateMachine):
 
     def _finalize_interrupted_run(self, exc: BaseException) -> None:
         """被中断时尽力保存并上报当前结果（包含进行中桌位）。"""
+        self.pipeline.close_displays()
         self.logger.event(
             "round_interrupted",
             round=self.round_name,
