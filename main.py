@@ -8,6 +8,7 @@ import signal
 import sys
 
 from core.app import run_round
+from core.warmup import run_warmup
 
 
 def _raise_keyboard_interrupt(signum, _frame) -> None:
@@ -29,6 +30,11 @@ def parse_args() -> argparse.Namespace:
         default="config/config.yaml",
         help="path to runtime config",
     )
+    parser.add_argument(
+        "--warmup",
+        action="store_true",
+        help="initialize model resources and exit without starting a round",
+    )
     return parser.parse_args()
 
 
@@ -39,6 +45,10 @@ def main() -> int:
     args = parse_args()
     os.environ.setdefault("CV3D_FAST_EXIT_AFTER_STOP", "1")
     try:
+        if args.warmup:
+            run_warmup(config_path=args.config, round_name=args.round)
+            print(f"Warmup finished for {args.round}.")
+            return 0
         result_path = run_round(config_path=args.config, round_name=args.round)
     except KeyboardInterrupt:
         print("\nInterrupted", file=sys.stderr)
