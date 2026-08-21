@@ -11,6 +11,7 @@ from rapidfuzz import process
 from core.components.ocr.base import BaseOcr
 from core.components.ocr.paddleocrv6 import DocOrientationPredictor, ONNXPaddleOcr
 from core.components.ocr.paddleocrv6.model_resolver import resolve_engine_config
+from core.components.ocr.text_match import normalize_ocr_match_text
 from core.types import Detection, Frame
 
 
@@ -70,7 +71,8 @@ class PaddleOcrV6(BaseOcr):
                 + ", ".join(missing_templates)
             )
         self.templates = [
-            str(ocr_templates[class_name]) for class_name in self.output_classes
+            normalize_ocr_match_text(ocr_templates[class_name])
+            for class_name in self.output_classes
         ]
 
         self.enlarge = float(config.get("enlarge", 1.0))
@@ -255,7 +257,7 @@ class PaddleOcrV6(BaseOcr):
 
     def _classify(self, text: str):
         """Fuzzy-match complete OCR text, rejecting information-poor strings."""
-        text = "".join(str(text).split())
+        text = normalize_ocr_match_text(text)
         if len(text) < self.min_text_length:
             return None, 0.0
         _matched, score, index = process.extractOne(text, self.templates)

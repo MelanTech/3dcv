@@ -10,6 +10,7 @@ from rapidfuzz import process
 from core.components.ocr.base import BaseOcr
 from core.components.ocr.paddleocrv5 import ONNXPaddleOcr
 from core.components.ocr.paddleocrv5.model_resolver import resolve_engine_config
+from core.components.ocr.text_match import normalize_ocr_match_text
 from core.types import Detection, Frame
 
 
@@ -48,7 +49,8 @@ class PaddleOcrV5(BaseOcr):
                 + ", ".join(missing_templates)
             )
         self.templates = [
-            str(ocr_templates[class_name]) for class_name in self.output_classes
+            normalize_ocr_match_text(ocr_templates[class_name])
+            for class_name in self.output_classes
         ]
 
         self.enlarge = float(config.get("enlarge", 1.0))
@@ -147,6 +149,7 @@ class PaddleOcrV5(BaseOcr):
         return str(self._read_details(rgb, bbox)["text"])
 
     def _classify(self, text: str):
+        text = normalize_ocr_match_text(text)
         _matched, score, index = process.extractOne(text, self.templates)
         if score > self.min_match_score:
             return self.output_classes[index], float(score)

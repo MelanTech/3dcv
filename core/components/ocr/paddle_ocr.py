@@ -15,6 +15,7 @@ from rapidfuzz import process
 from core.components.ocr.base import BaseOcr
 from core.components.ocr.paddleocr import ONNXPaddleOcr
 from core.components.ocr.paddleocr.model_resolver import resolve_engine_config
+from core.components.ocr.text_match import normalize_ocr_match_text
 from core.types import Detection, Frame
 
 
@@ -51,7 +52,10 @@ class PaddleOcr(BaseOcr):
                 "class_registry.ocr_templates must define every OCR output class: "
                 + ", ".join(missing_templates)
             )
-        self.templates = [str(ocr_templates[class_name]) for class_name in self.output_classes]
+        self.templates = [
+            normalize_ocr_match_text(ocr_templates[class_name])
+            for class_name in self.output_classes
+        ]
 
         self.enlarge = float(config.get("enlarge", 1.0))
         self.min_match_score = float(config.get("min_match_score", 0.0))
@@ -111,6 +115,7 @@ class PaddleOcr(BaseOcr):
 
     def _classify(self, text: str):
         """用 rapidfuzz 把识别文本模糊匹配到模板，返回 (类别名, 相似度) 或 (None, 0)。"""
+        text = normalize_ocr_match_text(text)
         _matched, score, index = process.extractOne(text, self.templates)
         if score > self.min_match_score:
             return self.output_classes[index], float(score)
