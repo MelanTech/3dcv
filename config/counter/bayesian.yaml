@@ -1,9 +1,9 @@
 counter:
-  type: bayesian
+  type: tracker
   max_object_count: 5
   total_max: 15
-  miss_rate: 0.7
-  false_positive_rate: 0.1
-  smooth_window: 5
-  min_positive_frames: 3
-  selection_threshold: 0.5
+  iou_threshold: 0.3
+  center_dist_threshold: 80.0  # 追踪器空间抢救机制：中心点距离（像素）
+  confirm_hits: 8
+  min_score_sum: 6.0           # 累计置信度积分门槛，彻底阻绝瞬间反光与局部噪点
+  max_lost_frames: 10          # 连续丢失进入休眠态的帧数门槛
