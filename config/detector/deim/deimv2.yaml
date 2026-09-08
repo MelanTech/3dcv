@@ -2,7 +2,7 @@ detector:
   # DEIMv2 shares the DEIM runtime and differs through preprocessing config.
   type: deimv2
   backend: auto
-  weights: models/deimv2/deimv2_2025_2026
+  weights: models/deimv2/deimv2_s_2025_2026_sim
 
   input_size: 640
   input_color: rgb

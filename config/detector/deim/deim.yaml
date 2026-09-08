@@ -3,7 +3,7 @@ detector:
   # auto: Orange Pi/Ascend uses the same-name .om; other platforms use .onnx.
   # The extension-less prefix keeps deployment configs identical across hosts.
   backend: auto
-  weights: models/deim/deim_s_2025_2026
+  weights: models/deim/deim_s_2025_2026_sim_ext
 
   # Preserve the 2025 DEIM export contract.
   input_size: 640
