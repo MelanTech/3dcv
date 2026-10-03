@@ -49,7 +49,7 @@ state_machine: !include state_machine/default.yaml
 frame_source: !include frame_source/eval_videos.yaml
 referee: !include referee/disabled.yaml
 class_registry: !include class_registry/default.yaml
-detector: !include detector/deim/deim.yaml
+detector: !include detector/yolo/yolo26.yaml
 unknown_merger: !include unknown_merger/default.yaml
 table_locator: !include table_locator/default.yaml
 filter: !include filter/depth_filter.yaml

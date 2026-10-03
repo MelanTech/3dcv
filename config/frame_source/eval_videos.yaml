@@ -1,8 +1,8 @@
 frame_source:
   type: image_sequence
   base_paths:
-    default: /Users/bytedance/Develop/datasets/3dcv/eval_videos
-    orangepi: /home/HwHiAiUser/Project/eval_videos
+    default: /Users/bytedance/Develop/datasets/3dcv/eval_videos/national
+    orangepi: /home/HwHiAiUser/Project/eval_videos/national
 
   common:
     read_interval: 1
@@ -23,13 +23,13 @@ frame_source:
   rounds:
     round1:
       sequences:
-        - eval_011
+        - eval_005
 
     round2:
       sequences:
-        - eval_015
-        - eval_016
-        - eval_017
+        - eval_001
+        - eval_002
+        - eval_007
       transition:
         enabled: true
         direction: random
