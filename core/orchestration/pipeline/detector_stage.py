@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Iterable, List, Optional, Tuple
 
 from core.components.detector.base import BaseDetector
 from core.types import Detection, Frame
@@ -35,6 +35,37 @@ class BaseDetectorStage(ABC):
     def close(self) -> None:
         """Release execution resources."""
         raise NotImplementedError
+
+    def observe_roi(
+        self,
+        _frame: Frame,
+        _detections: Iterable[Detection],
+        table: int,
+    ) -> None:
+        """Optionally collect full-frame detections for a later ROI transition."""
+        del table
+
+    def activate_roi(
+        self,
+        _table_bbox: Optional[tuple[int, int, int, int]],
+        table: int,
+        *,
+        using_default_bbox: bool = False,
+    ) -> bool:
+        """Optionally activate a table ROI; plain detector stages stay full-frame."""
+        del table, using_default_bbox
+        return False
+
+    def reset_roi(self) -> None:
+        """Optionally reset table ROI state."""
+
+    def render_view(
+        self,
+        frame: Frame,
+        detections: Iterable[Detection],
+    ) -> Tuple[Frame, List[Detection]]:
+        """Return the frame and boxes that should be shown by the visualizer."""
+        return frame, list(detections)
 
 
 class InlineDetectorStage(BaseDetectorStage):

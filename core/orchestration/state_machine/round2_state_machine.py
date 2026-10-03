@@ -84,6 +84,7 @@ class Round2StateMachine(BaseStateMachine):
                 # 1) 锁定桌面：稳定定位到当前桌后才开始正式识别。
                 with StateLogger(self.logger, "ACQUIRE_TABLE", table=table):
                     self._acquire_table(table, deadline=table_deadline)
+                self.pipeline.activate_detection_roi(table=table)
 
                 # 2) 识别窗口：在该桌时长内逐帧累计计数，并持续落盘最新结果。
                 state_name = f"PROCESS_TABLE_{table}_WINDOW"

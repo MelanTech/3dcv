@@ -35,22 +35,22 @@ filter:
       # 过滤“桌面贴图”：框内深度点几乎贴合桌面平面、且高度起伏很小。
       # 默认关闭；开启前建议先小样本验证 false_detection 下降且 missing 不上升。
       classes:
-        - Brush
-        - Earphone
-        - Cup
-        - ClothesHanger
-        - Chocolate
-        - MelonSeeds
-        - Sausage
+        - Glasses
+        - AdhesiveTape
+        - RemoteControl
+        - MeasuringTape
+        - Seasoning
+        - InstantNoodle
+        - Bread
         - Chips
-        - Can
-        - Bottle
-        - Milk
-        - Water
-        - Peach
-        - Apple
-        - Banana
-        - Pear
+        - CannedDrink
+        - BaggedDrink
+        - Water350ml
+        - Water550ml
+        - Pomegranate
+        - Persimmon
+        - Jujube
+        - Pomelo
       min_valid_depth_ratio: 0.15
       max_height_p90_m: 0.020
       max_height_relief_m: 0.018

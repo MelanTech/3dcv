@@ -235,6 +235,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                 lambda: build_detector_stage(
                     detector=detector,
                     config=config.get("pipeline", {}).get("async_detector"),
+                    roi_config=config.get("pipeline", {}).get("detection_roi"),
                     detector_config=config["detector"],
                     class_registry=config.get("class_registry"),
                     round_name=round_name,

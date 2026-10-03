@@ -1,44 +1,44 @@
 class_registry:
   # Pipeline 内部统一使用物品名称；最终写结果时再映射成比赛 Goal_ID。
   result_classes:
-    - Brush
-    - Earphone
-    - Cup
-    - ClothesHanger
-    - Chocolate
-    - MelonSeeds
-    - Sausage
+    - Glasses
+    - AdhesiveTape
+    - RemoteControl
+    - MeasuringTape
+    - Seasoning
+    - InstantNoodle
+    - Bread
     - Chips
-    - Can
-    - Bottle
-    - Milk
-    - Water
-    - Peach
-    - Apple
-    - Banana
-    - Pear
+    - CannedDrink
+    - BaggedDrink
+    - Water350ml
+    - Water550ml
+    - Pomegranate
+    - Persimmon
+    - Jujube
+    - Pomelo
     - W001
     - W002
     - W003
     - W004
 
   result_class_to_goal_id:
-    Brush: CA001
-    Earphone: CA002
-    Cup: CA003
-    ClothesHanger: CA004
-    Chocolate: CB001
-    MelonSeeds: CB002
-    Sausage: CB003
+    Glasses: CA001
+    AdhesiveTape: CA002
+    RemoteControl: CA003
+    MeasuringTape: CA004
+    Seasoning: CB001
+    InstantNoodle: CB002
+    Bread: CB003
     Chips: CB004
-    Can: CC001
-    Bottle: CC002
-    Milk: CC003
-    Water: CC004
-    Peach: CD001
-    Apple: CD002
-    Banana: CD003
-    Pear: CD004
+    CannedDrink: CC001
+    BaggedDrink: CC002
+    Water350ml: CC003
+    Water550ml: CC004
+    Pomegranate: CD001
+    Persimmon: CD002
+    Jujube: CD003
+    Pomelo: CD004
     W001: W001
     W002: W002
     W003: W003
@@ -50,24 +50,24 @@ class_registry:
     - UnknownOcrCandidate
 
   detector_id_to_class:
-    0: Table
-    1: Brush
-    2: Earphone
-    3: Cup
-    4: ClothesHanger
-    5: Chocolate
-    6: MelonSeeds
-    7: Sausage
-    8: Chips
-    9: Can
-    10: Bottle
-    11: Milk
-    12: Water
-    13: Peach
-    14: Apple
-    15: Banana
-    16: Pear
-    17: Book
+    0: Glasses
+    1: AdhesiveTape
+    2: RemoteControl
+    3: MeasuringTape
+    4: Seasoning
+    5: InstantNoodle
+    6: Bread
+    7: Chips
+    8: CannedDrink
+    9: BaggedDrink
+    10: Water350ml
+    11: Water550ml
+    12: Pomegranate
+    13: Persimmon
+    14: Jujube
+    15: Pomelo
+    16: Book
+    17: Table
 
   ignored_by_counter:
     - Table
@@ -94,22 +94,22 @@ class_registry:
     Table: [0, 255, 0]
     Book: [255, 255, 255]
     UnknownOcrCandidate: [255, 255, 255]
-    Brush: [255, 0, 0]
-    Earphone: [0, 255, 255]
-    Cup: [255, 0, 255]
-    ClothesHanger: [255, 255, 0]
-    Chocolate: [0, 128, 255]
-    MelonSeeds: [128, 255, 0]
-    Sausage: [255, 128, 0]
+    Glasses: [255, 0, 0]
+    AdhesiveTape: [0, 255, 255]
+    RemoteControl: [255, 0, 255]
+    MeasuringTape: [255, 255, 0]
+    Seasoning: [0, 128, 255]
+    InstantNoodle: [128, 255, 0]
+    Bread: [255, 128, 0]
     Chips: [0, 255, 128]
-    Can: [128, 0, 255]
-    Bottle: [255, 0, 128]
-    Milk: [0, 64, 255]
-    Water: [0, 255, 64]
-    Peach: [255, 64, 0]
-    Apple: [64, 255, 0]
-    Banana: [255, 255, 64]
-    Pear: [64, 255, 128]
+    CannedDrink: [128, 0, 255]
+    BaggedDrink: [255, 0, 128]
+    Water350ml: [0, 64, 255]
+    Water550ml: [0, 255, 64]
+    Pomegranate: [255, 64, 0]
+    Persimmon: [64, 255, 0]
+    Jujube: [255, 255, 64]
+    Pomelo: [64, 255, 128]
     W001: [255, 64, 255]
     W002: [64, 255, 255]
     W003: [255, 64, 128]

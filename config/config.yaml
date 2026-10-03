@@ -12,6 +12,11 @@ pipeline:
     # OrangePi only: a spawned process owns an independent ACL detector context.
     # The main process continues the prior frame's depth/OCR/counter stages.
     enabled: true
+  detection_roi:
+    enabled: true
+    padding_px: 12
+    transition_sec: 1.0
+    max_zoom: 2.0
 
 visualization:
   enabled: true
@@ -41,8 +46,8 @@ visualization:
 #     - final
 
 state_machine: !include state_machine/default.yaml
-frame_source: !include frame_source/orbbecsdk_astra.yaml
-referee: !include referee/default.yaml
+frame_source: !include frame_source/eval_videos.yaml
+referee: !include referee/disabled.yaml
 class_registry: !include class_registry/default.yaml
 detector: !include detector/deim/deim.yaml
 unknown_merger: !include unknown_merger/default.yaml

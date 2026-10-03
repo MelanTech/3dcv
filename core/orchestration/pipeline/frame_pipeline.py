@@ -1,4 +1,5 @@
 """逐帧处理流水线：被各轮次状态机共用。"""
+
 from __future__ import annotations
 
 from typing import Dict, Iterable, List, Optional
@@ -71,6 +72,7 @@ class FramePipeline:
         """清空不应从一个桌位/时间窗泄漏到下一个的状态。"""
         self.flush()
         self.current_table = None
+        self.detector_stage.reset_roi()
         self.table_locator.clear()
         self.counter.clear()
         self.logger.event("pipeline_table_state_reset")
@@ -87,6 +89,7 @@ class FramePipeline:
         detections = self.detector.infer(frame, table)
         self._render(frame, detections, table, stage="detect")
         detections = self.table_locator.process(detections, table)
+        self.detector_stage.observe_roi(frame, detections, table)
         for stage in ("track", "locate", "filter", "ocr", "final"):
             self._render(frame, detections, table, stage=stage)
         if self.log_per_frame:
@@ -99,6 +102,16 @@ class FramePipeline:
                 detection_count=len(detections),
             )
         self._publish_counts(self.counter.get_counts(), table=table)
+
+    def activate_detection_roi(self, table: int) -> bool:
+        """Start smooth ROI zoom after table acquisition has finished."""
+        bbox = getattr(self.table_locator, "target_bbox", None)
+        using_default = bool(getattr(self.table_locator, "using_default_bbox", False))
+        return self.detector_stage.activate_roi(
+            bbox,
+            table,
+            using_default_bbox=using_default,
+        )
 
     def process_frame(self, frame: Frame, table: int) -> Dict[str, int]:
         """处理单帧，并返回该桌位当前平滑后的计数结果。"""
@@ -256,8 +269,7 @@ class FramePipeline:
             candidate_classes = {"Book"}
 
         ocr_by_bbox = {
-            tuple(ocr_detection.bbox): ocr_detection
-            for ocr_detection in ocr_detections
+            tuple(ocr_detection.bbox): ocr_detection for ocr_detection in ocr_detections
         }
         merged: List[Detection] = []
         replaced_count = 0
@@ -290,7 +302,9 @@ class FramePipeline:
         suppressed = set()
         for candidate in unknown_candidates:
             source_classes = set(candidate.evidence.get("suppress_source_classes", ()))
-            iou_threshold = float(candidate.evidence.get("suppress_source_iou_threshold", 0.0))
+            iou_threshold = float(
+                candidate.evidence.get("suppress_source_iou_threshold", 0.0)
+            )
             if not source_classes or iou_threshold <= 0.0:
                 continue
             for index, detection in enumerate(detections):
@@ -315,9 +329,19 @@ class FramePipeline:
         stage: str,
     ) -> None:
         """带上当前状态机状态名进行可视化渲染。"""
-        self.visualizer.render(
+        render_frame, render_detections = self.detector_stage.render_view(
             frame,
             detections,
+        )
+        if stage == "final":
+            self.count_gui.update_preview(
+                render_frame,
+                render_detections,
+                table=table,
+            )
+        self.visualizer.render(
+            render_frame,
+            render_detections,
             table,
             stage=stage,
             state_name=self.current_state_name,

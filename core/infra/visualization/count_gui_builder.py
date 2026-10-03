@@ -1,15 +1,14 @@
 """Factory for the optional Tk live-count panel."""
-from __future__ import annotations
 
-from typing import Dict, Optional
+from __future__ import annotations
 
 from core.infra.logging.event_logger import EventLogger
 from core.infra.visualization.count_gui import BaseCountGui, NoopCountGui, TkCountGui
 
 
 def build_count_gui(
-    config: Optional[Dict],
-    class_registry: Optional[Dict],
+    config: dict | None,
+    class_registry: dict | None,
     logger: EventLogger,
 ) -> BaseCountGui:
     """Build the live count panel or an inert implementation when disabled."""
@@ -17,11 +16,13 @@ def build_count_gui(
         return NoopCountGui()
 
     try:
+        registry = class_registry or {}
         gui = TkCountGui(
             config=config,
-            count_rows=_count_rows(class_registry or {}),
+            count_rows=_count_rows(registry),
+            bbox_colors=_bbox_colors(registry),
         )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - optional GUI must fail closed
         logger.event(
             "count_gui_disabled",
             reason="initialization_failed",
@@ -34,7 +35,7 @@ def build_count_gui(
     return gui
 
 
-def _count_rows(class_registry: Dict) -> list[tuple[tuple[str, ...], str]]:
+def _count_rows(class_registry: dict) -> list[tuple[tuple[str, ...], str]]:
     """Use English class names for normal items and keep Wxxx unknown codes."""
     result_classes = [str(value) for value in class_registry.get("result_classes", ())]
     result_class_to_goal_id = {
@@ -52,3 +53,15 @@ def _count_rows(class_registry: Dict) -> list[tuple[tuple[str, ...], str]]:
         keys = (class_name,) if goal_id == class_name else (class_name, goal_id)
         rows.append((keys, display_name))
     return rows
+
+
+def _bbox_colors(class_registry: dict) -> dict[str, tuple[int, int, int]]:
+    """Load RGB bbox colors for the RGB preview."""
+    colors = {}
+    for class_name, value in dict(class_registry.get("bbox_colors", {})).items():
+        if not isinstance(value, (list, tuple)) or len(value) != 3:
+            continue
+        colors[str(class_name)] = tuple(
+            int(max(0, min(255, channel))) for channel in value
+        )
+    return colors

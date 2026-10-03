@@ -71,6 +71,7 @@ class Round1StateMachine(BaseStateMachine):
             # 锁定桌面：稳定定位到 1 号桌后再开始正式识别。
             with StateLogger(self.logger, "ACQUIRE_TABLE", table=1):
                 self._acquire_table(table=1, deadline=round_deadline)
+            self.pipeline.activate_detection_roi(table=1)
 
             with StateLogger(self.logger, "PROCESS_TABLE_1_WINDOW", table=1):
                 # 在识别时间窗内逐帧处理，并把每帧最新结果落盘（便于中断时兜底）。

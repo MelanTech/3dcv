@@ -540,13 +540,26 @@ PyObject *PyOrbbecSdkReader_next(PyOrbbecSdkReader *self, PyObject *) {
         PyErr_SetString(PyExc_RuntimeError, "reader is not initialized");
         return nullptr;
     }
+
+    MatchedSample sample;
+    std::string error;
+    PyThreadState *threadState = PyEval_SaveThread();
     try {
-        return sampleToDict(self->reader->next());
+        sample = self->reader->next();
     }
     catch(const std::exception &exc) {
-        PyErr_SetString(PyExc_RuntimeError, exc.what());
+        error = exc.what();
+    }
+    catch(...) {
+        error = "Unknown error while reading OrbbecSDK frames";
+    }
+    PyEval_RestoreThread(threadState);
+
+    if(!error.empty()) {
+        PyErr_SetString(PyExc_RuntimeError, error.c_str());
         return nullptr;
     }
+    return sampleToDict(sample);
 }
 
 PyObject *PyOrbbecSdkReader_get_intrinsic(PyOrbbecSdkReader *self, PyObject *) {

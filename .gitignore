@@ -16,6 +16,8 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv-object-cutout/
+.venv-sam-cutout/
 venv/
 env/
 ENV/
@@ -44,6 +46,8 @@ runs/
 result/
 results/
 outputs/
+data/object_cutouts/
+data/sam_cutout_projects/
 tmp/
 temp/
 models/

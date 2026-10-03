@@ -78,6 +78,7 @@ def run_warmup(config_path: str, round_name: str) -> None:
                 lambda: build_detector_stage(
                     detector=detector,
                     config=config.get("pipeline", {}).get("async_detector"),
+                    roi_config=None,
                     detector_config=config["detector"],
                     class_registry=config.get("class_registry"),
                     round_name=round_name,
