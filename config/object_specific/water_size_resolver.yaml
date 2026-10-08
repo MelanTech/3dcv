@@ -1,0 +1,38 @@
+water_size_resolver:
+  enabled: true
+  small_class: Water350ml
+  large_class: Water550ml
+
+  # Geometry may relabel only an ambiguous detector result. With paired class
+  # scores, ambiguity is based on the normalized score margin. End-to-end
+  # models that expose only the winning score use the conservative threshold.
+  detector_ambiguity:
+    paired_score_margin_max: 0.20
+    winner_score_max: 0.45
+
+  # Expected depth-derived long-axis ranges. These are intentionally wider
+  # than the physical sizes because transparent bottles are commonly
+  # underestimated by 1-2 cm and fluctuate with pose/depth holes. Lengths
+  # outside both intervals make the geometry branch abstain.
+  length_ranges_m:
+    Water350ml: [0.145, 0.195]
+    Water550ml: [0.200, 0.245]
+
+  geometry:
+    require_plane_fit: true
+    sample_stride: 2
+    max_points: 2000
+    min_points: 40
+    min_valid_depth_ratio: 0.03
+    min_object_height_m: 0.008
+    max_object_height_m: 0.35
+    min_linearity_ratio: 2.5
+    min_axis_coverage_ratio: 0.60
+    min_occupied_bin_ratio: 0.50
+    max_endpoint_gap_ratio: 0.20
+    min_endpoint_points: 3
+    min_endpoint_support_ratio: 0.20
+    length_valid_margin_m: 0.020
+    quantile_low: 2.0
+    quantile_high: 98.0
+    coverage_bins: 10

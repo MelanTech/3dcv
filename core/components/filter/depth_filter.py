@@ -1781,6 +1781,196 @@ class DepthFilter(BaseFilter):
             "height_relief_m": float(p90 - p10),
         }
 
+    def measure_object_long_axis(
+        self,
+        depth_image: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+        *,
+        sample_stride: int = 2,
+        max_points: int = 2000,
+        min_object_height_m: float = 0.008,
+        max_object_height_m: float = 0.35,
+        quantile_low: float = 2.0,
+        quantile_high: float = 98.0,
+        coverage_bins: int = 10,
+    ) -> Dict:
+        """Measure a pose-independent 3D long axis above the current table plane."""
+        if self.current_table_range is None:
+            return {"available": False, "reason": "table_model_unavailable"}
+        if depth_image is None or np.asarray(depth_image).ndim < 2:
+            return {"available": False, "reason": "depth_unavailable"}
+        if not 0.0 <= quantile_low < quantile_high <= 100.0:
+            raise ValueError("long-axis quantiles must satisfy 0 <= low < high <= 100")
+
+        height, width = depth_image.shape[:2]
+        self._ensure_ray_maps(width, height)
+        clipped = self._clip_bbox(bbox, width, height)
+        if clipped is None:
+            return {"available": False, "reason": "invalid_bbox"}
+
+        stride = max(1, int(sample_stride))
+        x1, y1, x2, y2 = clipped
+        xs = np.arange(x1, x2, stride, dtype=np.int32)
+        ys = np.arange(y1, y2, stride, dtype=np.int32)
+        if xs.size == 0 or ys.size == 0:
+            return {"available": False, "reason": "empty_bbox"}
+
+        grid_x, grid_y = np.meshgrid(xs, ys)
+        depth_mm = depth_image[np.ix_(ys, xs)]
+        valid = np.isfinite(depth_mm) & (depth_mm > 0)
+        if self.depth_trunc_m > 0.0:
+            valid &= depth_mm <= self.depth_trunc_m * 1000.0
+        sampled_pixel_count = int(depth_mm.size)
+        valid_depth_count = int(np.count_nonzero(valid))
+        if valid_depth_count < 3:
+            return {
+                "available": False,
+                "reason": "insufficient_valid_depth",
+                "valid_depth_count": valid_depth_count,
+                "sampled_pixel_count": sampled_pixel_count,
+            }
+
+        pixel_x = grid_x[valid]
+        pixel_y = grid_y[valid]
+        depth_m = depth_mm[valid].astype(np.float64) / 1000.0
+        cam_x = self.ray_x_map[pixel_y, pixel_x] * depth_m
+        cam_y = self.ray_y_map[pixel_y, pixel_x] * depth_m
+        points_cam = np.column_stack((cam_x, cam_y, depth_m))
+        points_world = np.sum(
+            points_cam[:, None, :] * self.rotation_matrix[None, :, :],
+            axis=2,
+        )
+        points_world += self.translation_vector
+
+        table_model_source = str(self.table_model_source)
+        table_y = (
+            0.0
+            if table_model_source.startswith("plane_fit")
+            else float(self.current_table_range["y_min"])
+        )
+        object_height = points_world[:, 1] - table_y
+        foreground = (
+            np.isfinite(object_height)
+            & (object_height >= float(min_object_height_m))
+            & (object_height <= float(max_object_height_m))
+        )
+        points_world = points_world[foreground]
+        pixels = np.column_stack((pixel_x[foreground], pixel_y[foreground])).astype(
+            np.float64,
+            copy=False,
+        )
+        foreground_point_count = int(points_world.shape[0])
+        foreground_depth_ratio = (
+            foreground_point_count / float(sampled_pixel_count)
+            if sampled_pixel_count > 0
+            else 0.0
+        )
+        if foreground_point_count < 3:
+            return {
+                "available": False,
+                "reason": "insufficient_foreground_depth",
+                "valid_depth_count": valid_depth_count,
+                "foreground_point_count": foreground_point_count,
+                "sampled_pixel_count": sampled_pixel_count,
+                "foreground_depth_ratio": foreground_depth_ratio,
+                "table_model_source": str(self.table_model_source),
+            }
+
+        max_points = max(3, int(max_points))
+        if foreground_point_count > max_points:
+            indices = np.linspace(
+                0,
+                foreground_point_count - 1,
+                max_points,
+                dtype=np.int32,
+            )
+            points_world = points_world[indices]
+            pixels = pixels[indices]
+
+        centered = points_world - np.median(points_world, axis=0)
+        _u, singular_values, axes = np.linalg.svd(centered, full_matrices=False)
+        principal_axis = axes[0]
+        axis_projection = np.sum(centered * principal_axis[None, :], axis=1)
+        lower_axis, upper_axis = np.percentile(
+            axis_projection,
+            [quantile_low, quantile_high],
+        )
+        long_axis_length = float(upper_axis - lower_axis)
+        second_variance = (
+            float(singular_values[1] ** 2)
+            if singular_values.size > 1
+            else 0.0
+        )
+        linearity_ratio = float(
+            singular_values[0] ** 2 / max(second_variance, 1e-12)
+        )
+
+        centered_pixels = pixels - np.median(pixels, axis=0)
+        _pixel_u, _pixel_s, pixel_axes = np.linalg.svd(
+            centered_pixels,
+            full_matrices=False,
+        )
+        pixel_axis = pixel_axes[0]
+        point_pixel_projection = np.sum(pixels * pixel_axis[None, :], axis=1)
+        corners = np.asarray(
+            [[x1, y1], [x2 - 1, y1], [x2 - 1, y2 - 1], [x1, y2 - 1]],
+            dtype=np.float64,
+        )
+        corner_projection = np.sum(corners * pixel_axis[None, :], axis=1)
+        bbox_axis_min = float(np.min(corner_projection))
+        bbox_axis_max = float(np.max(corner_projection))
+        bbox_axis_span = max(1e-6, bbox_axis_max - bbox_axis_min)
+        point_axis_low, point_axis_high = np.percentile(
+            point_pixel_projection,
+            [quantile_low, quantile_high],
+        )
+        axis_coverage_ratio = float(
+            np.clip((point_axis_high - point_axis_low) / bbox_axis_span, 0.0, 1.0)
+        )
+        lower_endpoint_gap_ratio = float(
+            np.clip((point_axis_low - bbox_axis_min) / bbox_axis_span, 0.0, 1.0)
+        )
+        upper_endpoint_gap_ratio = float(
+            np.clip((bbox_axis_max - point_axis_high) / bbox_axis_span, 0.0, 1.0)
+        )
+
+        coverage_bins = max(2, int(coverage_bins))
+        histogram, _edges = np.histogram(
+            point_pixel_projection,
+            bins=coverage_bins,
+            range=(bbox_axis_min, bbox_axis_max),
+        )
+        occupied_bin_ratio = float(np.count_nonzero(histogram) / coverage_bins)
+        lower_endpoint_point_count = int(histogram[0])
+        upper_endpoint_point_count = int(histogram[-1])
+        expected_bin_count = max(1.0, len(point_pixel_projection) / coverage_bins)
+        endpoint_support_ratio = float(
+            np.clip(
+                min(lower_endpoint_point_count, upper_endpoint_point_count)
+                / expected_bin_count,
+                0.0,
+                1.0,
+            )
+        )
+
+        return {
+            "available": True,
+            "long_axis_length_m": long_axis_length,
+            "foreground_point_count": foreground_point_count,
+            "valid_depth_count": valid_depth_count,
+            "sampled_pixel_count": sampled_pixel_count,
+            "foreground_depth_ratio": foreground_depth_ratio,
+            "linearity_ratio": linearity_ratio,
+            "axis_coverage_ratio": axis_coverage_ratio,
+            "occupied_bin_ratio": occupied_bin_ratio,
+            "lower_endpoint_gap_ratio": lower_endpoint_gap_ratio,
+            "upper_endpoint_gap_ratio": upper_endpoint_gap_ratio,
+            "lower_endpoint_point_count": lower_endpoint_point_count,
+            "upper_endpoint_point_count": upper_endpoint_point_count,
+            "endpoint_support_ratio": endpoint_support_ratio,
+            "table_model_source": table_model_source,
+        }
+
     def _vertical_footprint_extra_margin(self, center: np.ndarray, y_min: float) -> float:
         """按 table-y 高度把桌面 footprint 向外扩成倒置梯形/锥台。"""
         if not self.footprint_vertical_expansion_enabled:

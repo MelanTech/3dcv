@@ -24,7 +24,7 @@ from core.utils.box import bbox_iou
 
 
 class FramePipeline:
-    """依次执行：检测 → 桌面定位 → 深度过滤 → OCR → 计数 → 可视化。"""
+    """依次执行：检测 → 桌面定位 → 深度过滤 → 物品专用解析 → OCR → 计数。"""
 
     def __init__(
         self,
@@ -41,6 +41,7 @@ class FramePipeline:
         ignored_by_counter: Iterable[str] = (),
         round_started_at: Optional[float] = None,
         detector_stage: Optional[BaseDetectorStage] = None,
+        water_size_resolver=None,
     ):
         self.detector = detector
         self.table_locator = table_locator
@@ -59,6 +60,7 @@ class FramePipeline:
         self._is_closing = False
         self._displays_closed = False
         self.detector_stage = detector_stage or InlineDetectorStage(detector)
+        self.water_size_resolver = water_size_resolver
 
     def set_state(self, state_name: str) -> None:
         """记录当前状态机状态名，供可视化 overlay 使用。"""
@@ -183,6 +185,33 @@ class FramePipeline:
                 frame_id=frame.frame_id,
                 detection_count=len(detections),
             )
+
+        if self.water_size_resolver is not None:
+            detections = self.water_size_resolver.process(frame, detections, table)
+            if self.log_per_frame:
+                resolver_evidence = [
+                    detection.evidence["water_size_resolver"]
+                    for detection in detections
+                    if "water_size_resolver" in detection.evidence
+                ]
+                self.logger.event(
+                    "pipeline_water_size_resolver",
+                    table=table,
+                    frame_id=frame.frame_id,
+                    water_detection_count=len(resolver_evidence),
+                    geometry_valid_count=sum(
+                        bool(evidence["geometry_valid"])
+                        for evidence in resolver_evidence
+                    ),
+                    geometry_abstain_count=sum(
+                        evidence["decision_reason"] == "geometry_abstained"
+                        for evidence in resolver_evidence
+                    ),
+                    override_count=sum(
+                        bool(evidence["override_applied"])
+                        for evidence in resolver_evidence
+                    ),
+                )
 
         ocr_detections = self.ocr.process(frame, detections, table)
         detections, ocr_replaced_count = self._merge_ocr_detections(

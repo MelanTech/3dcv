@@ -53,5 +53,6 @@ detector: !include detector/yolo/yolo26.yaml
 unknown_merger: !include unknown_merger/default.yaml
 table_locator: !include table_locator/default.yaml
 filter: !include filter/depth_filter.yaml
+water_size_resolver: !include object_specific/water_size_resolver.yaml
 ocr: !include ocr/paddleocrv6.yaml
 counter: !include counter/consensus.yaml

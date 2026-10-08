@@ -14,6 +14,9 @@ from core.components.referee.builder import build_referee_client
 from core.infra.logging.event_logger import EventLogger
 from core.infra import pause_clock
 from core.components.ocr.builder import build_ocr
+from core.components.object_specific.water_size_resolver import (
+    build_water_size_resolver,
+)
 from core.components.unknown_merger.builder import build_unknown_merger
 from core.orchestration.pipeline.builder import build_detector_stage
 from core.orchestration.pipeline.frame_pipeline import FramePipeline
@@ -151,6 +154,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
         unknown_merger = None
         frame_source = None
         table_filter = None
+        water_size_resolver = None
         visualizer = None
         count_gui = None
         detector_stage = None
@@ -210,6 +214,15 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                     error=filter_intrinsic_error,
                     fallback="config",
                 )
+            water_size_resolver = _build_component(
+                logger,
+                "water_size_resolver",
+                lambda: build_water_size_resolver(
+                    config.get("water_size_resolver"),
+                    config.get("class_registry"),
+                    table_filter,
+                ),
+            )
             counter = _build_component(
                 logger,
                 "counter",
@@ -259,6 +272,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                     ignored_by_counter=config.get("class_registry", {}).get("ignored_by_counter", []),
                     round_started_at=round_started_at,
                     detector_stage=detector_stage,
+                    water_size_resolver=water_size_resolver,
                 ),
             )
 
@@ -300,6 +314,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                     ("detector_stage", detector_stage),
                     ("count_gui", count_gui),
                     ("visualizer", visualizer),
+                    ("water_size_resolver", water_size_resolver),
                     ("filter", table_filter),
                     ("frame_source", frame_source),
                     ("unknown_merger", unknown_merger),

@@ -10,7 +10,7 @@ detector:
   max_det: 300
   max_nms: 30000
   max_wh: 7680
-  agnostic_nms: false
+  agnostic_nms: true
   # auto: detect raw Ultralytics head or end-to-end/NMS output.
   # raw: force xywh + class-scores postprocess.
   # end2end: force xyxy + score + class output parsing.
