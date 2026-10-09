@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from typing import Dict, List, Optional, Tuple
 
+import cv2
 import numpy as np
 
 from core.components.filter.base import BaseFilter
@@ -122,6 +123,17 @@ class DepthFilter(BaseFilter):
         # 矮物体射线漂移小、无需复核，可避免误救桌外物品。<=0 表示不限高度。
         self.support_point_reproject_min_height_m = float(
             read(filtering_config, "reproject_min_height_m", 0.08)
+        )
+        self.support_point_table_bbox_margin_px = max(
+            0,
+            int(read(filtering_config, "table_bbox_margin_px", 4)),
+        )
+        self.table_bbox_side_reject_enabled = bool(
+            read(filtering_config, "side_reject_enabled", True)
+        )
+        self.table_bbox_side_reject_margin_px = max(
+            0,
+            int(read(filtering_config, "side_reject_margin_px", 0)),
         )
         self.visualize = bool(
             read(visualization_config, "enabled", False, "visualize")
@@ -409,6 +421,7 @@ class DepthFilter(BaseFilter):
         self.table_model_missing_frames = 0
         self.frame_index = 0
         self.current_table = 0
+        self.current_table_bbox_2d: Optional[Tuple[int, int, int, int]] = None
         self.last_plane_fit_frame = -10**9
         self.locked_footprint: Optional[str] = None
         self.pending_footprint: Optional[str] = None
@@ -446,7 +459,7 @@ class DepthFilter(BaseFilter):
 
     @staticmethod
     def _is_table(detection: Detection) -> bool:
-        return detection.class_id == 0 or detection.class_name == "Table"
+        return detection.class_name == "Table"
 
     def _ensure_ray_maps(self, width: int, height: int) -> None:
         """预计算每个像素的归一化相机射线，避免每帧重复算内参反投影。"""
@@ -704,22 +717,46 @@ class DepthFilter(BaseFilter):
         center: np.ndarray,
         inliers: np.ndarray,
     ) -> np.ndarray:
-        """用桌面平面内点的 PCA 主方向估计桌子长宽方向。"""
+        """Estimate stable tabletop axes from its minimum-area rectangle."""
         x_axis, y_axis, z_axis = self._initial_table_axes(normal)
+        configured_footprint = self.table_footprint_mode
+        if configured_footprint == "by_table":
+            configured_footprint = self.table_footprint_by_table.get(
+                int(self.current_table),
+                "rectangle",
+            )
+        if configured_footprint == "ellipse":
+            return np.vstack((x_axis, y_axis, z_axis)).astype(np.float64)
+
         plane_points = inliers - center
         plane_coords = np.column_stack((plane_points @ x_axis, plane_points @ z_axis))
         if plane_coords.shape[0] >= 3:
-            covariance = np.cov(plane_coords, rowvar=False)
             try:
-                eigen_values, eigen_vectors = np.linalg.eigh(covariance)
-                principal = eigen_vectors[:, int(np.argmax(eigen_values))]
-                x_axis = principal[0] * x_axis + principal[1] * z_axis
-                x_axis = x_axis / np.linalg.norm(x_axis)
+                rectangle = cv2.minAreaRect(
+                    np.ascontiguousarray(plane_coords, dtype=np.float32)
+                )
+                corners = cv2.boxPoints(rectangle).astype(np.float64)
+                edge_candidates = (
+                    corners[1] - corners[0],
+                    corners[2] - corners[1],
+                )
+                edge = max(
+                    edge_candidates,
+                    key=lambda candidate: abs(float(candidate[0]))
+                    / max(float(np.linalg.norm(candidate)), 1e-9),
+                )
+                edge_norm = float(np.linalg.norm(edge))
+                if edge_norm > 1e-9:
+                    edge /= edge_norm
+                    if edge[0] < 0.0:
+                        edge = -edge
+                    x_axis = edge[0] * x_axis + edge[1] * z_axis
+                    x_axis = x_axis / np.linalg.norm(x_axis)
                 z_axis = np.cross(x_axis, y_axis)
                 z_axis = z_axis / np.linalg.norm(z_axis)
                 x_axis = np.cross(y_axis, z_axis)
                 x_axis = x_axis / np.linalg.norm(x_axis)
-            except np.linalg.LinAlgError:
+            except (cv2.error, ValueError):
                 pass
 
         # 固定方向符号，避免连续帧坐标轴来回翻转。
@@ -1152,6 +1189,17 @@ class DepthFilter(BaseFilter):
         self.frame_index += 1
         self.current_table_range = None
         self.table_model_source = "fallback"
+        table_detections = [
+            detection for detection in detections if self._is_table(detection)
+        ]
+        if table_detections:
+            self.current_table_bbox_2d = max(
+                table_detections,
+                key=lambda detection: (
+                    max(0, detection.bbox[2] - detection.bbox[0])
+                    * max(0, detection.bbox[3] - detection.bbox[1])
+                ),
+            ).bbox
 
         if (
             self.plane_fit_enabled
@@ -1167,8 +1215,8 @@ class DepthFilter(BaseFilter):
                 for detection in detections
                 if not self._is_table(detection)
             ]
-            for detection in detections:
-                if self._is_table(detection) and self._fit_table_model_from_detection(
+            for detection in table_detections:
+                if self._fit_table_model_from_detection(
                     depth_image,
                     detection,
                     exclude_bboxes=exclude_bboxes,
@@ -1276,9 +1324,20 @@ class DepthFilter(BaseFilter):
             x1, _y1, x2, y2 = clipped
             support_x = (x1 + x2) // 2
             support_y = max(0, y2 - 1)
+            support_inside_table = self._support_point_inside_table_bbox(
+                support_x,
+                support_y,
+            )
             intersection = self._table_plane_intersection_cam(support_x, support_y)
             if intersection is not None:
                 point_cam, depth_m = intersection
+                if not support_inside_table:
+                    real_support = self._support_point_from_depth(
+                        depth_image,
+                        clipped,
+                    )
+                    if real_support is None:
+                        return None
                 grounded = self._support_point_on_ground(
                     depth_image, clipped, depth_m
                 )
@@ -1287,6 +1346,12 @@ class DepthFilter(BaseFilter):
                     # 用真实脚点参与过滤（其桌面 y 会落在平面之下而被剔除）。
                     return grounded, float(grounded[2]), clipped
                 return point_cam, depth_m, clipped
+            if not support_inside_table:
+                return self.get_object_3d_coordinates(
+                    depth_image,
+                    clipped,
+                    allow_table_plane_fallback=False,
+                )
 
         return self.get_object_3d_coordinates(
             depth_image,
@@ -1312,6 +1377,90 @@ class DepthFilter(BaseFilter):
         if self.support_point_ground_reject_gap_m <= 0.0:
             return None
 
+        support_point = self._support_point_from_depth(depth_image, clipped)
+        if support_point is None:
+            return None
+        real_depth_m = float(support_point[2])
+        gap = real_depth_m - plane_depth_m
+        if gap <= self.support_point_ground_reject_gap_m:
+            return None
+        if (
+            self.support_point_ground_reject_max_gap_m > 0.0
+            and gap > self.support_point_ground_reject_max_gap_m
+        ):
+            return None
+        return support_point
+
+    def _support_point_inside_table_bbox(
+        self,
+        support_x: int,
+        support_y: int,
+    ) -> bool:
+        """Return whether the projected object base lies inside the table image box."""
+        if self.current_table_bbox_2d is None:
+            return True
+        x1, y1, x2, y2 = self.current_table_bbox_2d
+        margin = self.support_point_table_bbox_margin_px
+        return bool(
+            x1 - margin <= support_x <= x2 + margin
+            and y1 - margin <= support_y <= y2 + margin
+        )
+
+    def _table_bbox_side_reject_direction(
+        self,
+        detection: Detection,
+    ) -> Optional[str]:
+        """Return a reject direction for isolated left/right/bottom detections.
+
+        The upper side is deliberately exempt: objects stacked on the table can
+        project above the detected tabletop box. The test uses image-space boxes
+        only as a conservative fast-path before depth-based filtering.
+        """
+        if (
+            not self.table_bbox_side_reject_enabled
+            or self.current_table_bbox_2d is None
+            or self._is_table(detection)
+        ):
+            return None
+
+        x1, y1, x2, y2 = detection.bbox
+        table_x1, table_y1, table_x2, table_y2 = self.current_table_bbox_2d
+        overlap_width = min(x2, table_x2) - max(x1, table_x1)
+        overlap_height = min(y2, table_y2) - max(y1, table_y1)
+        if overlap_width > 0 and overlap_height > 0:
+            return None
+
+        margin = self.table_bbox_side_reject_margin_px
+        if y2 <= table_y1 + margin:
+            return None
+        if x2 <= table_x1 - margin:
+            return "left"
+        if x1 >= table_x2 + margin:
+            return "right"
+        if y1 >= table_y2 + margin:
+            return "bottom"
+        return None
+
+    def _attach_table_bbox_side_reject_evidence(
+        self,
+        detection: Detection,
+        direction: str,
+    ) -> None:
+        detection.evidence.setdefault("depth_filter", {}).update(
+            {
+                "kept": False,
+                "reason": "outside_table_bbox",
+                "outside_table_bbox_direction": direction,
+                "table_bbox_2d": self.current_table_bbox_2d,
+            }
+        )
+
+    def _support_point_from_depth(
+        self,
+        depth_image: np.ndarray,
+        clipped: Tuple[int, int, int, int],
+    ) -> Optional[np.ndarray]:
+        """Recover a real 3D support point from the bbox bottom band."""
         x1, y1, x2, y2 = clipped
         height, width = depth_image.shape[:2]
         box_height = max(1, y2 - y1)
@@ -1331,19 +1480,7 @@ class DepthFilter(BaseFilter):
         if valid.size < self.object_depth_min_valid_pixels:
             return None
 
-        # 用较近分位数代表脚点深度，抑制透出背景的远端噪声。
         real_depth_m = float(np.percentile(valid, self.support_point_near_percentile)) / 1000.0
-        gap = real_depth_m - plane_depth_m
-        if gap <= self.support_point_ground_reject_gap_m:
-            return None
-        # 合理性上限：过大的 gap 多半是脚点深度读取失败（落空到远处背景），
-        # 不足以据此判为地面物品，避免误杀桌面物品。
-        if (
-            self.support_point_ground_reject_max_gap_m > 0.0
-            and gap > self.support_point_ground_reject_max_gap_m
-        ):
-            return None
-
         support_x = (band_x1 + band_x2) // 2
         support_y = max(0, band_y2 - 1)
         ray = np.array(
@@ -2406,6 +2543,13 @@ class DepthFilter(BaseFilter):
         valid_detections: List[Detection] = []
         centers_world = []
         for detection in detections:
+            direction = self._table_bbox_side_reject_direction(detection)
+            if direction is not None:
+                self._attach_table_bbox_side_reject_evidence(
+                    detection,
+                    direction,
+                )
+                continue
             result = self.get_detection_filter_coordinates(
                 depth_image,
                 detection,

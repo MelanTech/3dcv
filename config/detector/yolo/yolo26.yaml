@@ -1,11 +1,11 @@
 detector:
   type: yolo26
   backend: auto
-  weights: models/national/yolo26/yolo26m_national_sim_aug
+  weights: models/national/yolo26/yolo26m_national_sim_aug_mosaic
   input_width: 640
   input_height: 640
   pad_value: 114
-  conf_thresh: 0.25
+  conf_thresh: 0.32
   nms_thresh: 0.7
   max_det: 300
   max_nms: 30000

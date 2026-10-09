@@ -26,6 +26,7 @@ from core.orchestration.state_machine.state_logger import StateLogger
 from core.components.table_locator.builder import build_table_locator
 from core.infra.visualization.count_gui_builder import build_count_gui
 from core.infra.visualization.builder import build_visualizer
+from core.utils.platform import current_platform
 
 
 RoundName = str
@@ -123,6 +124,45 @@ def _filter_intrinsic_config(filter_config):
             return _filter_intrinsic_config(filter_config["filter"])
         return filter_config.get("intrinsic")
     return None
+
+
+def _depth_filter_visualization_enabled(filter_config) -> bool:
+    if not isinstance(filter_config, dict):
+        return False
+    if set(filter_config) == {"filter"}:
+        return _depth_filter_visualization_enabled(filter_config["filter"])
+    if str(filter_config.get("type", "")).strip().lower() != "depth":
+        return False
+    depth_filter = filter_config.get("depth_filter", {})
+    if not isinstance(depth_filter, dict):
+        return False
+    visualization = depth_filter.get("visualization", {})
+    if not isinstance(visualization, dict):
+        return False
+    return bool(visualization.get("enabled", False))
+
+
+def _count_gui_config(config: dict, logger: EventLogger) -> dict | None:
+    visualization = config.get("visualization", {})
+    if not isinstance(visualization, dict):
+        return None
+    count_gui_config = visualization.get("count_gui")
+    if not isinstance(count_gui_config, dict):
+        return count_gui_config
+    if (
+        count_gui_config.get("enabled", False)
+        and current_platform() == "macos"
+        and _depth_filter_visualization_enabled(config.get("filter"))
+    ):
+        logger.event(
+            "count_gui_disabled",
+            reason="macos_open3d_tk_conflict",
+            detail="depth_filter Open3D visualization owns NSApplication before Tk",
+        )
+        disabled_config = dict(count_gui_config)
+        disabled_config["enabled"] = False
+        return disabled_config
+    return count_gui_config
 
 
 def run_round(config_path: str, round_name: RoundName) -> Path:
@@ -237,7 +277,7 @@ def run_round(config_path: str, round_name: RoundName) -> Path:
                 logger,
                 "count_gui",
                 lambda: build_count_gui(
-                    config.get("visualization", {}).get("count_gui"),
+                    _count_gui_config(config, logger),
                     config.get("class_registry"),
                     logger,
                 ),

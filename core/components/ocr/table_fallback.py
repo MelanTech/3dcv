@@ -236,7 +236,11 @@ class TableFallbackOcr(BaseOcr):
         image_shape: tuple[int, int],
     ) -> Optional[tuple[int, int, int, int]]:
         height, width = image_shape
-        tables = [detection for detection in detections if detection.class_name == "Table" or detection.class_id == 0]
+        tables = [
+            detection
+            for detection in detections
+            if detection.class_name == "Table"
+        ]
         if not tables:
             return None
         table = max(tables, key=lambda detection: self._area(detection.bbox))

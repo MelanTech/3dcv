@@ -29,13 +29,16 @@ filter:
       ground_reject_max_gap_m: 0.0        # <=0 表示不设上限；脚点深度明显远于桌面平面时始终按地面/背景过滤
       reproject_recover: true             # 交点落桌外时用真实深度反投影中心复核，纠正高/边缘物体横向漂移
       reproject_min_height_m: 0.08         # 复核只对真实高度超过该值(米)的高物体启用，避免误救桌外物品
+      table_bbox_margin_px: 4             # 桌外且无有效深度的框不得回退到桌面平面；此值为桌边像素容差
+      side_reject_enabled: true           # 与桌框零重叠且在左/右/下侧时直接过滤；上侧保留，避免误杀叠放物
+      side_reject_margin_px: 0            # 触发直接过滤所需的最小像素间隔
 
     sticker_filter:
       enabled: true
       # 过滤“桌面贴图”：框内深度点几乎贴合桌面平面、且高度起伏很小。
       # 默认关闭；开启前建议先小样本验证 false_detection 下降且 missing 不上升。
       classes:
-        - Glasses
+        # - Glasses
         - AdhesiveTape
         - RemoteControl
         - MeasuringTape
