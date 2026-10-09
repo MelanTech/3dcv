@@ -48,6 +48,7 @@ class OpenNIFrameSource(BaseFrameSource):
         mirror: bool,
         d2c: Optional[dict] = None,
         sync: Optional[dict] = None,
+        table_types: Optional[dict] = None,
     ):
         self.width = int(width)
         self.height = int(height)
@@ -58,6 +59,7 @@ class OpenNIFrameSource(BaseFrameSource):
         self.mirror = bool(mirror)
         self.d2c_config = dict(d2c or {})
         self.sync_config = dict(sync or {})
+        self.table_types = dict(table_types or {})
         self.d2c_mode = self.d2c_config.get("mode", "hardware")
         if self.d2c_mode not in ("hardware", "off"):
             raise ValueError("frame_source.d2c.mode must be hardware or off")
@@ -307,6 +309,11 @@ class OpenNIFrameSource(BaseFrameSource):
             rgb=rgb,
             depth=depth,
             timestamp=time.time(),
+            metadata={
+                "frame_source_type": "openni",
+                "table_types": dict(self.table_types),
+                "table_type_source": "frame_source_config",
+            },
         )
 
     def _start_uvc_latest_thread(self) -> None:

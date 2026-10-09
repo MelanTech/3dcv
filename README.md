@@ -598,8 +598,7 @@ RGBD detector 额外配置：
 
 | 键 | 示例 | 说明 |
 | --- | --- | --- |
-| `mode` | `by_table` | 桌面 footprint 类型：`by_table` / `auto` / `rectangle` / `ellipse` |
-| `table_modes` | `{1: rectangle, 2: rectangle, 3: ellipse}` | `by_table` 时按桌号指定 footprint；第一轮 table=1，因此也是方桌 |
+| `mode` | `auto` | metadata 缺失时的桌面 footprint 兜底：`auto` / `rectangle` / `ellipse`；正常运行由帧 metadata 的 `table_type` 决定 |
 | `range_percentile` | `2.0` | 估计桌面边界时丢弃两端离群点的百分比 |
 | `size_scale` | `1.0` | 平面拟合成功时，对自动估计桌面长宽做等比例缩放 |
 | `range_margin_m` | `0.05` | 自动估计桌面范围后额外扩出的边缘余量（米） |

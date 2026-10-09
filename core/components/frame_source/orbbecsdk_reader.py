@@ -23,6 +23,7 @@ class OrbbecSdkFrameSource(BaseFrameSource):
         self.fps = int(self.config.get("fps", 30))
         self.align_config = dict(self.config.get("align", {}))
         self.sync_config = dict(self.config.get("sync", {}))
+        self.table_types = dict(self.config.get("table_types", {}))
         self.align_mode = str(self.align_config.get("mode", "hardware"))
         self.enable_frame_sync = bool(self.sync_config.get("enable_frame_sync", False))
         self.approx_sync_ms = float(self.sync_config.get("approx_sync_ms", 50.0))
@@ -63,6 +64,11 @@ class OrbbecSdkFrameSource(BaseFrameSource):
             rgb=sample["rgb"],
             depth=sample["depth"],
             timestamp=time.time(),
+            metadata={
+                "frame_source_type": "orbbecsdk",
+                "table_types": dict(self.table_types),
+                "table_type_source": "frame_source_config",
+            },
         )
 
     def _read_intrinsic(self) -> Dict[str, float]:

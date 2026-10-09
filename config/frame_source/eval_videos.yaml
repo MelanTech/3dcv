@@ -8,6 +8,8 @@ frame_source:
     read_interval: 1
     fps: 30
     loop: false
+    metadata_filename: metadata.json
+    require_table_type_metadata: true
     rgb_dir: rgb
     depth_dir: depth
     rgb_suffix: _rgb

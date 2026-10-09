@@ -250,20 +250,10 @@ class DepthFilter(BaseFilter):
         self.table_footprint_mode = str(
             read(footprint_config, "mode", "auto", "table_footprint_mode")
         ).strip().lower()
-        if self.table_footprint_mode not in ("auto", "rectangle", "ellipse", "by_table"):
+        if self.table_footprint_mode not in ("auto", "rectangle", "ellipse"):
             raise ValueError(
-                "depth_filter.table_footprint_mode must be auto, rectangle, ellipse, or by_table"
+                "depth_filter.table_footprint_mode must be auto, rectangle, or ellipse"
             )
-        table_modes = footprint_config.get("table_modes", {})
-        self.table_footprint_by_table = {
-            int(table): str(mode).strip().lower()
-            for table, mode in table_modes.items()
-        }
-        for table, mode in self.table_footprint_by_table.items():
-            if mode not in ("rectangle", "ellipse"):
-                raise ValueError(
-                    f"depth_filter.footprint.table_modes[{table}] must be rectangle or ellipse"
-                )
         self.round_table_fill_ratio_max = float(
             read(
                 footprint_config,
@@ -421,6 +411,7 @@ class DepthFilter(BaseFilter):
         self.table_model_missing_frames = 0
         self.frame_index = 0
         self.current_table = 0
+        self.current_table_type: Optional[str] = None
         self.current_table_bbox_2d: Optional[Tuple[int, int, int, int]] = None
         self.last_plane_fit_frame = -10**9
         self.locked_footprint: Optional[str] = None
@@ -460,6 +451,48 @@ class DepthFilter(BaseFilter):
     @staticmethod
     def _is_table(detection: Detection) -> bool:
         return detection.class_name == "Table"
+
+    @staticmethod
+    def _normalize_table_type(value) -> Optional[str]:
+        if value is None:
+            return None
+        table_type = str(value).strip().lower()
+        if table_type not in ("square", "round"):
+            raise ValueError(
+                f"table_type must be 'square' or 'round', got {value!r}"
+            )
+        return table_type
+
+    def _resolve_frame_table_type(self, frame: Frame, table: int) -> Optional[str]:
+        metadata = frame.metadata if isinstance(frame.metadata, dict) else {}
+        explicit_type = self._normalize_table_type(metadata.get("table_type"))
+        if explicit_type is not None:
+            return explicit_type
+
+        table_types = metadata.get("table_types")
+        if not isinstance(table_types, dict):
+            return None
+        return self._normalize_table_type(
+            table_types.get(table, table_types.get(str(table)))
+        )
+
+    def _set_current_table_type(self, frame: Frame, table: int) -> None:
+        table_type = self._resolve_frame_table_type(frame, table)
+        if table_type == self.current_table_type:
+            return
+        self.current_table_type = table_type
+        self.locked_footprint = None
+        self.pending_footprint = None
+        self.pending_footprint_count = 0
+
+    def _configured_table_footprint(self) -> Optional[str]:
+        if self.current_table_type == "square":
+            return "rectangle"
+        if self.current_table_type == "round":
+            return "ellipse"
+        if self.table_footprint_mode != "auto":
+            return self.table_footprint_mode
+        return None
 
     def _ensure_ray_maps(self, width: int, height: int) -> None:
         """预计算每个像素的归一化相机射线，避免每帧重复算内参反投影。"""
@@ -719,12 +752,7 @@ class DepthFilter(BaseFilter):
     ) -> np.ndarray:
         """Estimate stable tabletop axes from its minimum-area rectangle."""
         x_axis, y_axis, z_axis = self._initial_table_axes(normal)
-        configured_footprint = self.table_footprint_mode
-        if configured_footprint == "by_table":
-            configured_footprint = self.table_footprint_by_table.get(
-                int(self.current_table),
-                "rectangle",
-            )
+        configured_footprint = self._configured_table_footprint()
         if configured_footprint == "ellipse":
             return np.vstack((x_axis, y_axis, z_axis)).astype(np.float64)
 
@@ -980,11 +1008,9 @@ class DepthFilter(BaseFilter):
         length: float,
     ) -> Tuple[str, float, float]:
         """根据平面内点云填充率自动判断方桌/圆桌，或使用配置强制类型。"""
-        if self.table_footprint_mode == "by_table":
-            footprint = self.table_footprint_by_table.get(int(self.current_table), "rectangle")
-            return footprint, 0.0, 0.0
-        if self.table_footprint_mode != "auto":
-            return self.table_footprint_mode, 0.0, 0.0
+        configured_footprint = self._configured_table_footprint()
+        if configured_footprint is not None:
+            return configured_footprint, 0.0, 0.0
 
         bbox_area = max(width * length, 1e-9)
         hull = self._convex_hull_2d(table_points[:, [0, 2]])
@@ -1010,7 +1036,7 @@ class DepthFilter(BaseFilter):
 
     def _stabilize_footprint(self, footprint: str) -> str:
         """对 auto 判断出的圆/方桌类型做滞回，避免边界帧来回切换。"""
-        if self.table_footprint_mode != "auto":
+        if self._configured_table_footprint() is not None:
             self.locked_footprint = footprint
             self.pending_footprint = None
             self.pending_footprint_count = 0
@@ -1092,6 +1118,7 @@ class DepthFilter(BaseFilter):
             "radius_z": half_z + margin,
             "footprint": stabilized_footprint,
             "raw_footprint": footprint,
+            "table_type": self.current_table_type,
             "footprint_fill_ratio": fill_ratio,
             "footprint_corner_ratio": corner_ratio,
             "source": "plane_fit",
@@ -1805,6 +1832,7 @@ class DepthFilter(BaseFilter):
         evidence.update(
             {
                 "kept": bool(keep),
+                "table_type": self.current_table_type,
                 "center_height_above_table_m": float(center[1]) - float(fp_params["y_min"]),
                 "footprint": str(fp_params.get("footprint", "rectangle")),
                 "table_model_source": str(self.table_model_source),
@@ -2538,6 +2566,7 @@ class DepthFilter(BaseFilter):
             return detections
 
         self.current_table = int(_table)
+        self._set_current_table_type(frame, self.current_table)
         self.update_table_model(detections, depth_image)
 
         valid_detections: List[Detection] = []

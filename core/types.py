@@ -13,6 +13,7 @@ class Frame:
     rgb: Any
     depth: Any
     timestamp: float
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

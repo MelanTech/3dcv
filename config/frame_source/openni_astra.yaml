@@ -8,6 +8,10 @@ frame_source:
   uvc_device: /dev/video0
   allow_unregistered: true
   mirror: false
+  table_types:
+    1: square
+    2: round
+    3: round
   d2c:
     # hardware: let the Orbbec OpenNI driver register depth to color.
     # off: return raw depth without registration.

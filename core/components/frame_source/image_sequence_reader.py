@@ -5,6 +5,7 @@ round2 通过 next_sequence() 在桌位间切换序列。
 """
 from __future__ import annotations
 
+import json
 import random
 import time
 from pathlib import Path
@@ -36,6 +37,10 @@ class ImageSequenceFrameSource(BaseFrameSource):
         self.rgb_extensions = tuple(config.get("rgb_extensions", [".jpg", ".jpeg", ".png"]))
         self.depth_extensions = tuple(config.get("depth_extensions", [".png"]))
         self.convert_rgb = bool(config.get("convert_rgb", True))
+        self.metadata_filename = str(config.get("metadata_filename", "metadata.json"))
+        self.require_table_type_metadata = bool(
+            config.get("require_table_type_metadata", False)
+        )
         self.transition_config = dict(config.get("transition", {}))
         self.transition_enabled = bool(self.transition_config.get("enabled", False))
         self.transition_direction = self.transition_config.get("direction", "left")
@@ -90,6 +95,7 @@ class ImageSequenceFrameSource(BaseFrameSource):
                     {
                         "name": sequence_dir.name,
                         "base_path": sequence_dir,
+                        "metadata": self._load_sequence_metadata(sequence_dir),
                         "rgb_dir": rgb_dir,
                         "depth_dir": depth_dir,
                         "pairs": pairs,
@@ -99,6 +105,33 @@ class ImageSequenceFrameSource(BaseFrameSource):
         if not sequences:
             raise ValueError(f"no valid image sequences found under: {self.base_path}")
         return sequences
+
+    def _load_sequence_metadata(self, sequence_dir: Path) -> Dict:
+        """Read the per-video metadata needed by downstream spatial filters."""
+        metadata_path = sequence_dir / self.metadata_filename
+        if not metadata_path.exists():
+            if self.require_table_type_metadata:
+                raise ValueError(f"sequence metadata does not exist: {metadata_path}")
+            return {}
+
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise ValueError(f"invalid sequence metadata: {metadata_path}") from exc
+        if not isinstance(metadata, dict):
+            raise ValueError(f"sequence metadata must be an object: {metadata_path}")
+
+        table_type = metadata.get("table_type")
+        if table_type is not None:
+            table_type = str(table_type).strip().lower()
+            if table_type not in ("square", "round"):
+                raise ValueError(
+                    f"{metadata_path}: table_type must be 'square' or 'round'"
+                )
+            metadata["table_type"] = table_type
+        elif self.require_table_type_metadata:
+            raise ValueError(f"{metadata_path}: required field 'table_type' is missing")
+        return metadata
 
     def _resolve_sequence_dirs(self) -> List[Path]:
         if self.sequence_names:
@@ -175,7 +208,7 @@ class ImageSequenceFrameSource(BaseFrameSource):
                 pair = pairs[self.current_frame_index]
                 self.current_frame_index += self.read_interval
                 self._throttle_frame_rate()
-                return self._read_frame(sequence["name"], pair)
+                return self._read_frame(sequence, pair)
 
             if self._start_transition_to_next_sequence(sequence):
                 continue
@@ -183,7 +216,7 @@ class ImageSequenceFrameSource(BaseFrameSource):
             self.current_sequence_index += 1
             self.current_frame_index = 0
 
-    def _read_frame(self, sequence_name: str, pair: Dict) -> Frame:
+    def _read_frame(self, sequence: Dict, pair: Dict) -> Frame:
         """读取一对已经对齐好的 RGB/深度图，按需做色彩空间转换后封装成 Frame。"""
         rgb = cv2.imread(str(pair["rgb_path"]), cv2.IMREAD_COLOR)
         if rgb is None:
@@ -196,10 +229,15 @@ class ImageSequenceFrameSource(BaseFrameSource):
             raise ValueError(f"failed to read depth image: {pair['depth_path']}")
 
         return Frame(
-            frame_id=f"{sequence_name}/{pair['frame_id']}",
+            frame_id=f"{sequence['name']}/{pair['frame_id']}",
             rgb=rgb,
             depth=depth,
             timestamp=time.time(),
+            metadata={
+                "frame_source_type": "image_sequence",
+                "sequence_name": sequence["name"],
+                **dict(sequence["metadata"]),
+            },
         )
 
     def _start_transition_to_next_sequence(self, sequence: Dict, use_current_frame: bool = False) -> bool:
@@ -221,8 +259,8 @@ class ImageSequenceFrameSource(BaseFrameSource):
         old_pair_index = len(current_pairs) - 1
         if use_current_frame:
             old_pair_index = max(0, min(self.current_frame_index - self.read_interval, len(current_pairs) - 1))
-        old_frame = self._read_frame(sequence["name"], current_pairs[old_pair_index])
-        new_frame = self._read_frame(next_sequence["name"], next_sequence["pairs"][0])
+        old_frame = self._read_frame(sequence, current_pairs[old_pair_index])
+        new_frame = self._read_frame(next_sequence, next_sequence["pairs"][0])
         direction = self._select_transition_direction()
         self.transition_state = {
             "from_sequence": sequence["name"],
@@ -272,6 +310,11 @@ class ImageSequenceFrameSource(BaseFrameSource):
             rgb=rgb,
             depth=depth,
             timestamp=time.time(),
+            metadata={
+                **dict(new_frame.metadata),
+                "transition_from_sequence": state["from_sequence"],
+                "transition_to_sequence": state["to_sequence"],
+            },
         )
 
     def _throttle_frame_rate(self) -> None:
@@ -366,6 +409,7 @@ class ImageSequenceFrameSource(BaseFrameSource):
             "sequence_index": self.current_sequence_index,
             "name": sequence["name"],
             "base_path": str(sequence["base_path"]),
+            "table_type": sequence["metadata"].get("table_type"),
             "total_frames": len(sequence["pairs"]),
             "remaining_frames": max(0, len(sequence["pairs"]) - self.current_frame_index),
         }

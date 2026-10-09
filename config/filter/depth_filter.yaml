@@ -88,11 +88,8 @@ filter:
       roi_shrink_ratio: 0.04
 
     footprint:
-      mode: by_table
-      table_modes:
-        1: rectangle
-        2: rectangle
-        3: ellipse
+      # 正常运行由 Frame metadata 的 table_type 决定；此项仅用于 metadata 缺失时自动判断。
+      mode: auto
       range_percentile: 2.0
       size_scale: 1.0
       range_margin_m: 0.05

@@ -4,6 +4,10 @@ frame_source:
   width: 640
   height: 480
   fps: 30
+  table_types:
+    1: square
+    2: round
+    3: round
   align:
     # hardware: use OrbbecSDK hardware D2C.
     # software: use OrbbecSDK software D2C.

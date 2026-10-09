@@ -31,6 +31,7 @@ def build_frame_source(config: dict, round_name: str) -> BaseFrameSource:
             mirror=config["mirror"],
             d2c=config.get("d2c"),
             sync=config.get("sync"),
+            table_types=config.get("table_types"),
         )
 
     if frame_source_type == "orbbecsdk":

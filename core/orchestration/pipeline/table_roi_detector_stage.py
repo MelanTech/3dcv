@@ -49,6 +49,7 @@ class RoiTransform:
             rgb=self._crop_array(frame.rgb, interpolation=cv2.INTER_LINEAR),
             depth=self._crop_array(frame.depth, interpolation=cv2.INTER_NEAREST),
             timestamp=frame.timestamp,
+            metadata=dict(frame.metadata),
         )
 
     def detection_to_global(self, detection: Detection) -> Detection | None:
