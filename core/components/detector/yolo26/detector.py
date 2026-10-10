@@ -21,6 +21,7 @@ from core.components.detector.base import BaseDetector
 from core.components.detector.yolo26.resolver import resolve_yolo26_backend
 from core.components.detector.yolov11_rgbd.postprocess import (
     PostprocessConfig,
+    _nms,
     non_max_suppression,
     prepare_yolo_output,
     scale_boxes,
@@ -222,7 +223,22 @@ class Yolo26Detector(BaseDetector):
             return np.zeros((0, 6), dtype=np.float32)
 
         order = output[:, 4].argsort()[::-1]
-        output = output[order[: self.postprocess_config.max_det]]
+        if order.size > self.postprocess_config.max_nms:
+            order = order[: self.postprocess_config.max_nms]
+        output = output[order]
+        boxes = output[:, :4]
+        scores = output[:, 4]
+        class_ids = output[:, 5]
+        offsets = (
+            0
+            if self.postprocess_config.agnostic_nms
+            else class_ids[:, None] * self.postprocess_config.max_wh
+        )
+        selected = _nms(boxes + offsets, scores, self.postprocess_config.nms_thresh)
+        selected = selected[: self.postprocess_config.max_det]
+        if not selected:
+            return np.zeros((0, 6), dtype=np.float32)
+        output = output[np.asarray(selected, dtype=np.int64)]
         return output.astype(np.float32, copy=False)
 
     def _looks_like_end2end(self, outputs) -> bool:
@@ -306,4 +322,3 @@ def _build_backend(
 
         return AclBackend(model_path, config)
     raise ValueError(f"unsupported resolved YOLO26 backend: {backend_name}")
-
