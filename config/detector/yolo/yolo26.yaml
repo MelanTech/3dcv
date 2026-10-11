@@ -1,7 +1,7 @@
 detector:
   type: yolo26
   backend: auto
-  weights: models/national/yolo26/yolo26m_national_sim_aug_mosaic
+  weights: models/national/yolo26/yolo26m_national_sim_aug_mosaic_datafix
   input_width: 640
   input_height: 640
   pad_value: 114
